@@ -4,8 +4,6 @@ Quyết định NỘI DUNG menu bar, tách khỏi phần dựng NSMenu.
 Tách ra để test được mà không cần AppKit và không cần chạy vòng lặp giao diện —
 `statusbar.py` lo phần Objective-C, file này lo phần logic.
 """
-from typing import Optional
-
 MAX_LABEL = 44
 
 

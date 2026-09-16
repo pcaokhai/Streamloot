@@ -139,8 +139,7 @@ def _build(on_show, on_quit, port, title, task_actions):
         menu = AppKit.NSMenu.alloc().init()
 
         def rebuild(m):
-            m.removeAllItems()
-            _populate(m, target, port, task_actions['list']())
+            _rebuild_safe(m, target, port, task_actions)
 
         delegate = _MenuDelegate.alloc().initWithBuilder_(rebuild)
         menu.setDelegate_(delegate)
@@ -151,6 +150,21 @@ def _build(on_show, on_quit, port, title, task_actions):
         Logger.get_logger().debug("Menu bar item installed")
     except Exception as e:
         Logger.error(f"Không dựng được menu bar item: {e}", exc_info=True)
+
+
+def _rebuild_safe(menu, target, port, task_actions):
+    """
+    Dựng lại menu, được gọi từ `_MenuDelegate.menuNeedsUpdate_` mỗi lần menu
+    sắp mở — ngoài phạm vi try/except một lần lúc cài trong `_build`. Không để
+    lộ exception ra ngoài callback ObjC: menu vỡ trong im lặng là đúng loại bug
+    đắt nhất của app này — log rồi để menu ở trạng thái dở dang, còn hơn ném ra
+    ngoài mất luôn dấu vết.
+    """
+    try:
+        menu.removeAllItems()
+        _populate(menu, target, port, task_actions['list']())
+    except Exception as e:
+        Logger.error(f"Không dựng lại được menu bar: {e}", exc_info=True)
 
 
 def _populate(menu, target, port, active_tasks):

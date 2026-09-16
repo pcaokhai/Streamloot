@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -52,6 +53,36 @@ class TestMenuModel(unittest.TestCase):
             [{"task_id": "a", "title": None, "status": "pending", "progress": None}]
         )
         self.assertIsNotNone(model["download"]["label"])
+
+
+class TestRebuildGuard(unittest.TestCase):
+    """
+    `_rebuild_safe` là hàng rào chống lộ exception ra ngoài `menuNeedsUpdate_`
+    (callback ObjC) — nếu `_populate`/`build_menu_model` ném, menu bar vỡ trong
+    im lặng, đúng loại bug đắt nhất của app này. Test import `apps.desktop.statusbar`
+    trực tiếp (chỉ cần import AppKit headless được, không cần chạy vòng lặp GUI
+    hay dựng NSMenu thật — menu truyền vào chỉ là stub Python).
+    """
+
+    def test_rebuild_logs_and_does_not_propagate_on_error(self):
+        from apps.desktop import statusbar
+
+        class FakeMenu:
+            def removeAllItems(self):
+                pass
+
+        with patch.object(statusbar, "_populate", side_effect=RuntimeError("boom")), \
+             patch("apps.desktop.statusbar.Logger.error") as mock_log_error:
+            try:
+                statusbar._rebuild_safe(
+                    FakeMenu(), target=None, port=8001,
+                    task_actions={"list": lambda: []},
+                )
+            except Exception:
+                self.fail("_rebuild_safe phải nuốt exception, không ném tiếp")
+
+            mock_log_error.assert_called_once()
+            self.assertIn("boom", mock_log_error.call_args[0][0])
 
 
 if __name__ == "__main__":

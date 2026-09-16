@@ -160,17 +160,29 @@ def main():
         hist = HistoryService()
 
         def toggle(task_id):
-            task = hist.get_task(task_id)
-            if not task:
-                return
-            # Gọi thẳng endpoint dưới dạng hàm: cùng tiến trình, đi vòng qua HTTP
-            # của chính mình là thừa.
-            from apps.api.main import pause_download, resume_download
-            (resume_download if task["status"] == "paused" else pause_download)(task_id)
+            # Gọi thẳng endpoint dưới dạng hàm, đi vòng qua HTTP của chính mình
+            # là thừa — nhưng cũng đi vòng qua luôn cơ chế bắt HTTPException của
+            # FastAPI. Các hàm này `raise HTTPException` cho những tình huống
+            # bình thường (đã pause rồi, process đã chết...); để lọt ra ngoài
+            # đây là ném thẳng từ một ObjC action selector, im lặng vỡ menu.
+            try:
+                task = hist.get_task(task_id)
+                if not task:
+                    Logger.get_logger().debug(
+                        f"Menu bar: task {task_id} không còn tồn tại, bỏ qua toggle"
+                    )
+                    return
+                from apps.api.main import pause_download, resume_download
+                (resume_download if task["status"] == "paused" else pause_download)(task_id)
+            except Exception as e:
+                Logger.error(f"Menu bar: không toggle được task {task_id}: {e}", exc_info=True)
 
         def cancel(task_id):
-            from apps.api.main import cancel_download
-            cancel_download(task_id)
+            try:
+                from apps.api.main import cancel_download
+                cancel_download(task_id)
+            except Exception as e:
+                Logger.error(f"Menu bar: không huỷ được task {task_id}: {e}", exc_info=True)
 
         statusbar.install(
             on_show=show_window,
