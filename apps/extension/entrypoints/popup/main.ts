@@ -4,12 +4,25 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 
 async function render() {
   const { hits = [] } = (await browser.storage.local.get('hits')) as { hits?: Hit[] };
+  const { seenTotal = 0 } = (await browser.storage.session.get('seenTotal')) as { seenTotal?: number };
   const score = document.getElementById('score')!;
   const out = document.getElementById('out')!;
 
+  // Một số 0 có hai nghĩa rất khác nhau. Phải nói rõ là nghĩa nào.
   if (!hits.length) {
-    score.textContent = '0 site';
-    out.innerHTML = '<div class="empty">Chưa bắt được manifest nào. Mở site cần đo và bấm play.</div>';
+    if (seenTotal === 0) {
+      score.textContent = 'Probe chưa chạy';
+      out.innerHTML =
+        '<div class="empty"><b>Chưa quan sát được request nào.</b> Listener chưa chạy — thử tải lại trang, ' +
+        'hoặc mở <code>chrome://extensions</code> → "service worker" xem log lỗi.</div>';
+      return;
+    }
+    score.textContent = '0 manifest';
+    out.innerHTML =
+      `<div class="empty"><b>Probe chạy tốt</b> — đã quan sát ~${seenTotal}+ request, nhưng không có manifest nào.<br><br>` +
+      'Site này không dùng HLS/DASH. YouTube video thường là ví dụ: media đi qua ' +
+      '<code>googlevideo.com/videoplayback</code> + range request qua MSE, không có file manifest. ' +
+      'Đây là kết quả hợp lệ, không phải lỗi.</div>';
     return;
   }
 
@@ -19,6 +32,7 @@ async function render() {
   score.textContent = `${byHost.size} site bắt được`;
 
   out.innerHTML =
+    `<div class="sub">đã quan sát ~${seenTotal}+ request</div>` +
     '<table><tr><th>Host</th><th>Hits</th><th>Qua</th><th>Ngữ cảnh phiên</th></tr>' +
     [...byHost].map(([host, hs]) => {
       const via = [...new Set(hs.map((h) => h.via))].join(' + ');
@@ -35,6 +49,7 @@ async function render() {
 
 document.getElementById('clear')!.addEventListener('click', async () => {
   await browser.storage.local.remove('hits');
+  await browser.storage.session.remove('seenTotal');
   void render();
 });
 

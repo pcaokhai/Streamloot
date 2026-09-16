@@ -24,6 +24,17 @@ export interface Hit {
   ctx: { cookie: boolean; referer: boolean; userAgent: boolean; origin: boolean };
 }
 
+// Một số 0 phải đọc được: nếu không đếm tổng request thì "0 manifest" vừa có thể
+// nghĩa là listener chưa chạy, vừa có thể nghĩa là site không có manifest nào.
+// Đếm trong RAM rồi flush theo lô — storage.session nằm trong bộ nhớ (không chạm
+// đĩa) và sống qua các lần service worker bị thu hồi.
+let seen = 0;
+async function bumpSeen() {
+  if (++seen % 20 !== 0) return; // mất tối đa 19 lần đếm nếu SW chết — không ảnh hưởng câu hỏi "có > 0 không"
+  const { seenTotal = 0 } = (await browser.storage.session.get('seenTotal')) as { seenTotal?: number };
+  await browser.storage.session.set({ seenTotal: seenTotal + 20 });
+}
+
 // C3 (ADR 0006): MV3 thu hồi service worker bất kỳ lúc nào, nên state phải nằm ở
 // storage. Giữ trong biến module là mất sạch kết quả probe giữa chừng.
 async function record(hit: Hit) {
@@ -39,6 +50,7 @@ export default defineBackground(() => {
   // Request headers: cần 'extraHeaders' mới thấy Cookie/Referer (Chrome lọc mặc định).
   browser.webRequest.onSendHeaders.addListener(
     (d) => {
+      void bumpSeen();
       const via = detect(d.url);
       if (!via) return;
       const has = (n: string) => !!d.requestHeaders?.some((h) => h.name.toLowerCase() === n);

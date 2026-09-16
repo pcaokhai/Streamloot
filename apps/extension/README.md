@@ -27,7 +27,29 @@ Muốn sửa code và xem ngay thì `npm run dev` (WXT tự reload).
 
 ## Đọc kết quả
 
-Popup hiện con số duy nhất cần thiết: **bắt được mấy site**, kèm bảng chi tiết.
+Popup phân biệt ba trạng thái — quan trọng vì một số 0 trần không đọc được:
+
+| Popup hiện | Nghĩa |
+|---|---|
+| **"Probe chưa chạy"** | Chưa quan sát được request nào → listener chết. Tải lại trang, hoặc mở `chrome://extensions` → "service worker" xem log |
+| **"0 manifest"** + số request đã quan sát | Probe chạy tốt, site này đơn giản là không dùng HLS/DASH. **Kết quả hợp lệ** |
+| **"N site bắt được"** | Có manifest, kèm bảng chi tiết bên dưới |
+
+### YouTube ra 0 là đúng
+
+YouTube video thường **không có manifest file**. Media đi qua
+`rr*.googlevideo.com/videoplayback?...` kèm range request qua MSE; thông tin
+format nằm trong `ytInitialPlayerResponse` JSON của trang. YouTube chỉ dùng m3u8
+cho **livestream** (`/api/manifest/hls_variant/`).
+
+Đó cũng là lý do `yt-dlp` xử lý YouTube qua player-response JSON chứ không sniff
+manifest — và vì sao YouTube đi đường B9 fallback trong thiết kế, không phải
+đường extension.
+
+**Nên đừng dùng YouTube để kiểm tra probe.** Ba site đích đều dùng HLS thật
+(cả ba plugin đều lắng nghe `m3u8`), nên chúng mới là phép đo có nghĩa.
+
+### Bảng chi tiết
 
 | Cột | Nghĩa |
 |---|---|
