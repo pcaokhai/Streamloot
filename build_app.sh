@@ -7,6 +7,7 @@ set -euo pipefail
 #   ./build_app.sh                 build dist/Streamloot.app
 #   ./build_app.sh --clean         wipe build/ dist/ vendor/ first
 #   ./build_app.sh --no-ffmpeg     skip vendoring ffmpeg (falls back to PATH)
+#   ./build_app.sh --no-chromium   skip vendoring Chromium (~300MB smaller)
 #   ./build_app.sh --sign "Developer ID Application: Name (TEAMID)"
 #   ./build_app.sh --open          reveal the result in Finder when done
 #
@@ -19,10 +20,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$SCRIPT_DIR"
 UI_DIR="$ROOT_DIR/apps/desktop/ui"
 VENDOR_BIN="$ROOT_DIR/packaging/vendor/bin"
+VENDOR_CHROME="$ROOT_DIR/packaging/vendor/chrome"
 APP_PATH="$ROOT_DIR/dist/Streamloot.app"
 
 CLEAN=false
 WITH_FFMPEG=true
+WITH_CHROMIUM=true
 SIGN_IDENTITY=""
 REVEAL=false
 
@@ -30,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -c|--clean)      CLEAN=true; shift ;;
         --no-ffmpeg)     WITH_FFMPEG=false; shift ;;
+        --no-chromium)   WITH_CHROMIUM=false; shift ;;
         --sign)          SIGN_IDENTITY="${2:-}"; shift 2 ;;
         --open)          REVEAL=true; shift ;;
         -h|--help)       sed -n '4,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -93,6 +97,50 @@ elif [[ "$WITH_FFMPEG" == false ]]; then
     echo "    skipping ffmpeg (--no-ffmpeg); app falls back to PATH at run time"
 fi
 
+# Chromium: các extractor dùng browser điều khiển nó qua CDP. Đóng gói riêng để
+# không phải đụng Chrome trong /Applications — app chỉ ký ad-hoc nên macOS App
+# Management chặn và hiện cảnh báo bảo mật. Kèm lợi: không đòi máy người dùng có
+# sẵn Chrome, và phiên bản bị ghim nên Chrome tự cập nhật không làm vỡ plugin.
+# Đổi lại ~300MB. Dùng --no-chromium để bỏ qua.
+if [[ "$WITH_CHROMIUM" == true && ! -d "$VENDOR_CHROME/Google Chrome for Testing.app" ]]; then
+    echo "    fetching Chrome for Testing (~182MB, chỉ tải một lần)..."
+    CFT_JSON="$(mktemp)"
+    if curl -fsSL --retry 3 \
+        "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json" \
+        -o "$CFT_JSON"; then
+        CFT_URL="$(python3 -c "
+import json,sys
+d=json.load(open('$CFT_JSON'))
+for x in d['channels']['Stable']['downloads']['chrome']:
+    if x['platform']=='mac-arm64':
+        print(x['url']); break
+" 2>/dev/null)"
+        CFT_VER="$(python3 -c "import json;print(json.load(open('$CFT_JSON'))['channels']['Stable']['version'])" 2>/dev/null)"
+        rm -f "$CFT_JSON"
+        if [[ -n "$CFT_URL" ]]; then
+            echo "    version $CFT_VER"
+            TMP_CHROME="$(mktemp -d)"
+            if curl -fL --retry 3 "$CFT_URL" -o "$TMP_CHROME/chrome.zip"; then
+                mkdir -p "$VENDOR_CHROME"
+                unzip -qo "$TMP_CHROME/chrome.zip" -d "$TMP_CHROME"
+                # Zip giải ra thư mục chrome-mac-arm64/ chứa bundle .app bên trong.
+                mv "$TMP_CHROME"/chrome-mac-arm64/* "$VENDOR_CHROME/" 2>/dev/null || true
+                echo "$CFT_VER" > "$VENDOR_CHROME/.version"
+            else
+                echo "    WARNING: tải Chromium thất bại; app sẽ dùng Chrome hệ thống" >&2
+            fi
+            rm -rf "$TMP_CHROME"
+        fi
+    else
+        rm -f "$CFT_JSON"
+        echo "    WARNING: không lấy được danh sách phiên bản Chrome for Testing" >&2
+    fi
+elif [[ "$WITH_CHROMIUM" == false ]]; then
+    echo "    skipping Chromium (--no-chromium); app dùng Chrome hệ thống"
+else
+    echo "    Chromium đã vendor sẵn ($(cat "$VENDOR_CHROME/.version" 2>/dev/null || echo '?'))"
+fi
+
 # -----------------------------------------------------------------------------
 echo "==> [3/5] Syncing Python dependencies..."
 uv sync 2>/dev/null || true
@@ -110,6 +158,14 @@ uv run pyinstaller \
     "$ROOT_DIR/packaging/Streamloot.spec"
 
 [[ -d "$APP_PATH" ]] || { echo "Error: PyInstaller finished but $APP_PATH is missing." >&2; exit 1; }
+
+# Chromium chép vào SAU PyInstaller, không qua datas: PyInstaller quét datas tìm
+# binary rồi ký đè ad-hoc, mà Chrome đã có chữ ký của Google — codesign fail và
+# sụp cả build. `ditto` giữ nguyên extended attributes và chữ ký, `cp -R` thì không.
+if [[ "$WITH_CHROMIUM" == true && -d "$VENDOR_CHROME/Google Chrome for Testing.app" ]]; then
+    echo "==> Chép Chromium vào bundle..."
+    ditto "$VENDOR_CHROME" "$APP_PATH/Contents/Frameworks/chrome"
+fi
 
 # -----------------------------------------------------------------------------
 echo "==> [5/5] Verifying the bundle..."
@@ -138,6 +194,7 @@ if [[ -d "$ROOT_DIR/plugins" ]]; then
     fi
 fi
 [[ "$WITH_FFMPEG" == true ]] && check "bin/ffmpeg"
+[[ "$WITH_CHROMIUM" == true ]] && check "chrome/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
 [[ -d "$ROOT_DIR/plugins" ]] && check "plugins"
 
 if [[ $FAILED -ne 0 ]]; then

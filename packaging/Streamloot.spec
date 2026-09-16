@@ -37,6 +37,10 @@ if (ROOT / "plugins").is_dir():
 if VENDOR_BIN.is_dir():
     datas.append((str(VENDOR_BIN), "bin"))
 
+# Chromium KHÔNG đi qua datas: PyInstaller quét datas tìm binary rồi ký đè ad-hoc,
+# mà Chrome đã được Google ký sẵn nên codesign fail và cả build sụp. build_app.sh
+# chép nó vào bundle bằng `ditto` sau khi PyInstaller chạy xong.
+
 datas += collect_data_files("webview")
 
 # --- imports --------------------------------------------------------------

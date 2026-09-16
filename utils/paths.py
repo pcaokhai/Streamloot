@@ -9,6 +9,7 @@ path points into the read-only bundle.
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 APP_NAME = "Streamloot"
 
@@ -81,6 +82,29 @@ def ensure_tool_path() -> None:
     additions = [c for c in candidates if c not in current and os.path.isdir(c)]
     if additions:
         os.environ["PATH"] = os.pathsep.join(additions + current)
+
+
+def bundled_chrome_path() -> Optional[Path]:
+    """
+    Đường dẫn tới Chromium đóng gói kèm, hoặc None nếu không có.
+
+    Đóng gói riêng để extractor không phải điều khiển Chrome trong /Applications:
+    app chỉ ký ad-hoc nên macOS App Management chặn và hiện cảnh báo bảo mật.
+    Kèm hai lợi ích khác: không đòi người dùng phải cài sẵn Chrome, và phiên bản
+    trình duyệt bị ghim nên Chrome tự cập nhật không làm vỡ plugin.
+
+    Trả None khi chạy từ source hoặc build với --no-chromium — lúc đó
+    DrissionPage tự dò trình duyệt hệ thống như trước.
+    """
+    exe = (
+        resource_dir()
+        / "chrome"
+        / "Google Chrome for Testing.app"
+        / "Contents"
+        / "MacOS"
+        / "Google Chrome for Testing"
+    )
+    return exe if exe.exists() else None
 
 
 def plugins_dir() -> Path:

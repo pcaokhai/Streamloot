@@ -9,6 +9,7 @@ from core.extractor import BaseExtractor
 from core.models import VideoInfo
 from typing import Optional, List
 from utils.logger import Logger
+from utils import paths
 
 # ponytail: process-wide lock, serializes concurrent browser extractions
 # (format preview + actual download) so no two ChromiumPage instances share
@@ -39,6 +40,14 @@ class BaseBrowserExtractor(BaseExtractor):
         session and tear it down under each other.
         """
         co = ChromiumOptions()
+
+        # Ưu tiên Chromium đóng gói kèm. Không có thì để DrissionPage tự dò trình
+        # duyệt hệ thống (đường chạy từ source). Xem paths.bundled_chrome_path().
+        bundled = paths.bundled_chrome_path()
+        if bundled:
+            co.set_browser_path(str(bundled))
+            Logger.get_logger().debug(f"Dùng Chromium đóng gói kèm: {bundled}")
+
         co.set_argument('--no-sandbox')
         co.set_argument('--disable-gpu')
         co.set_argument('--mute-audio')
