@@ -26,28 +26,37 @@ async function render() {
     return;
   }
 
+  // Lấy hit giàu ngữ cảnh nhất — một số request thiếu header mà request khác có.
+  const ctxOf = (hs: Hit[]) => {
+    if (!hs.length) return '<span class="none">chưa có</span>';
+    const best = hs.find((h) => h.ctx.cookie) ?? hs[0];
+    const parts = [
+      best.ctx.cookie ? '<b>cookie</b>' : null,
+      best.ctx.referer ? 'referer' : null,
+      best.ctx.origin ? 'origin' : null,
+      best.ctx.userAgent ? 'ua' : null,
+    ].filter(Boolean);
+    return parts.length ? parts.join(', ') : '<span class="none">không header nào</span>';
+  };
+
   // Nhóm theo TRANG, không theo CDN: câu hỏi "mấy trong 3 site" hỏi về trang.
   const byPage = new Map<string, Hit[]>();
   for (const h of hits) byPage.set(h.page, [...(byPage.get(h.page) ?? []), h]);
-  score.textContent = `${byPage.size} site bắt được`;
+  const pages = [...byPage].filter(([, hs]) => hs.some((h) => h.kind === 'manifest'));
+  score.textContent = `${pages.length} site bắt được`;
 
   out.innerHTML =
     `<div class="sub">đã quan sát ~${seenTotal}+ request</div>` +
-    '<table><tr><th>Trang</th><th>Manifest ở</th><th>Hits</th><th>Qua</th><th>Ngữ cảnh phiên</th></tr>' +
-    [...byPage].map(([page, hs]) => {
-      const cdns = [...new Set(hs.map((h) => h.host))].join(', ');
-      const via = [...new Set(hs.map((h) => h.via))].join(' + ');
-      // Lấy hit giàu ngữ cảnh nhất — một số request thiếu header mà request khác có.
-      const best = hs.find((h) => h.ctx.cookie) ?? hs[0];
-      const ctx = [
-        best.ctx.cookie ? 'cookie' : null,
-        best.ctx.referer ? 'referer' : null,
-        best.ctx.origin ? 'origin' : null,
-        best.ctx.userAgent ? 'ua' : null,
-      ].filter(Boolean).join(', ') || '—';
-      return `<tr><td class="host" title="${esc(page)}">${esc(page)}</td><td class="host" title="${esc(cdns)}">${esc(cdns)}</td><td>${hs.length}</td><td>${esc(via)}</td><td>${esc(ctx)}</td></tr>`;
+    '<table><tr><th>Trang</th><th>Manifest ở</th><th>Manifest: ngữ cảnh</th><th>Segment: ngữ cảnh</th></tr>' +
+    pages.map(([page, hs]) => {
+      const man = hs.filter((h) => h.kind === 'manifest');
+      const seg = hs.filter((h) => h.kind === 'segment');
+      const cdns = [...new Set(man.map((h) => h.host))].join(', ');
+      const segLabel = seg.length ? `${ctxOf(seg)} <span class="n">(n=${seg.length})</span>` : '<span class="none">chưa bắt được</span>';
+      return `<tr><td class="host" title="${esc(page)}">${esc(page)}</td><td class="host" title="${esc(cdns)}">${esc(cdns)}</td><td>${ctxOf(man)}</td><td>${segLabel}</td></tr>`;
     }).join('') +
-    '</table>';
+    '</table>' +
+    '<div class="sub" style="margin-top:8px">B14: cột <b>Segment</b> trả lời câu hỏi cookie. Có <b>cookie</b> ở segment mà không có ở manifest → extension phải dùng <code>chrome.cookies</code>, không dựa được vào header quan sát.</div>';
 }
 
 document.getElementById('clear')!.addEventListener('click', async () => {

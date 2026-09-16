@@ -59,6 +59,23 @@ manifest — và vì sao YouTube đi đường B9 fallback trong thiết kế, k
 | **Qua** | `url` = khớp đuôi `.m3u8`/`.mpd`; `content-type` = khớp header. Thấy `content-type` xuất hiện tức là **B12 có giá trị thật** |
 | **Ngữ cảnh phiên** | Bắt được `cookie`/`referer`/`origin`/`ua` chưa — đây là bước 3 của mô hình IDM (ADR 0005 §2.1). Thiếu cookie thì URL stream nhiều khả năng trả 403 khi tải ngoài trình duyệt |
 
+### B14 — cột Segment
+
+Probe quan sát cả request **segment**, không chỉ manifest. Đây là cột trả lời câu
+hỏi còn treo ở [ADR 0005 §7.3](../../docs/ADR/0005-stream-capture-architecture.md):
+một plugin đang thu cookie, nhưng trình duyệt không gửi cookie trên request
+manifest. Cookie đó cần cho segment, hay là thừa?
+
+| Cột Segment hiện | Kết luận |
+|---|---|
+| Không có `cookie` | Cookie là thừa. Extension cấp đủ; B1 không cần đường cookie |
+| **Có `cookie`** | Cookie cần cho segment. Extension **phải** dùng `chrome.cookies` API — header quan sát được là không đủ |
+| "chưa bắt được" | Chưa thấy segment nào. Bấm play và để chạy vài giây |
+
+Segment được nhận diện theo **host** (bất kỳ request nào tới host đã phục vụ
+manifest), không theo đuôi file — vì có site ngụy trang segment MPEG-TS thành PNG.
+Chỉ lấy 3 mẫu mỗi host: một video là hàng trăm segment.
+
 ### Thiếu cookie chưa chắc là vấn đề
 
 Nếu cột ngữ cảnh ra `referer, origin, ua` mà không có `cookie`, hãy đối chiếu với

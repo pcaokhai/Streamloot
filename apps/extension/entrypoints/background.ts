@@ -16,6 +16,8 @@ const detect = (url: string, contentType?: string) =>
   MANIFEST_URL.test(url) ? 'url' : contentType && MANIFEST_TYPE.test(contentType) ? 'content-type' : null;
 
 export interface Hit {
+  /** B14: manifest hay segment. Câu hỏi cookie chỉ trả lời được ở segment. */
+  kind: 'manifest' | 'segment';
   /** Trang đã khởi tạo request — câu hỏi "mấy trong 3 site" hỏi về cái này. */
   page: string;
   /** Host của chính manifest; thường là CDN riêng, khác tên miền trang. */
@@ -26,6 +28,17 @@ export interface Hit {
   /** Ngữ cảnh phiên mà bước 3 của IDM cần bàn giao cho downloader (ADR 0005 §2.1). */
   ctx: { cookie: boolean; referer: boolean; userAgent: boolean; origin: boolean };
 }
+
+// B14 — segment. KHÔNG nhận diện theo đuôi file là chính, vì có site ngụy trang
+// segment MPEG-TS thành PNG (xem cờ clean_disguised_ts của Plugin C). Đường chắc
+// hơn: bất kỳ request nào tới host đã từng phục vụ manifest.
+const SEGMENT_URL = /\.(ts|m4s|mp4|aac|m4a)(\?|$)/i;
+const manifestHosts = new Set<string>();
+const segCount = new Map<string, number>();
+const SEG_SAMPLES = 3; // đủ trả lời "có cookie không", không làm ngập storage
+
+const isSegment = (url: string, host: string) =>
+  !MANIFEST_URL.test(url) && (manifestHosts.has(host) || SEGMENT_URL.test(url));
 
 // d.initiator là origin của trang khởi tạo request. Thiếu nó thì popup chỉ hiện
 // hostname CDN, và người đo phải tự nhớ CDN nào thuộc site nào.
@@ -52,6 +65,7 @@ async function bumpSeen() {
 // C3 (ADR 0006): MV3 thu hồi service worker bất kỳ lúc nào, nên state phải nằm ở
 // storage. Giữ trong biến module là mất sạch kết quả probe giữa chừng.
 async function record(hit: Hit) {
+  if (hit.kind === 'manifest') manifestHosts.add(hit.host);
   const { hits = [] } = (await browser.storage.local.get('hits')) as { hits?: Hit[] };
   if (hits.some((h) => h.url === hit.url)) return; // playlist được fetch lại nhiều lần
   await browser.storage.local.set({ hits: [...hits, hit].slice(-200) });
@@ -65,14 +79,29 @@ export default defineBackground(() => {
   browser.webRequest.onSendHeaders.addListener(
     (d) => {
       void bumpSeen();
+      const host = new URL(d.url).hostname;
       const via = detect(d.url);
-      if (!via) return;
+
+      let kind: Hit['kind'];
+      if (via) {
+        kind = 'manifest';
+      } else if (isSegment(d.url, host)) {
+        // Chỉ lấy vài mẫu mỗi host: một video là hàng trăm segment.
+        const n = segCount.get(host) ?? 0;
+        if (n >= SEG_SAMPLES) return;
+        segCount.set(host, n + 1);
+        kind = 'segment';
+      } else {
+        return;
+      }
+
       const has = (n: string) => !!d.requestHeaders?.some((h) => h.name.toLowerCase() === n);
       void record({
+        kind,
         page: pageOf(d),
-        host: new URL(d.url).hostname,
+        host,
         url: d.url,
-        via,
+        via: via ?? 'url',
         at: Date.now(),
         ctx: { cookie: has('cookie'), referer: has('referer'), userAgent: has('user-agent'), origin: has('origin') },
       });
@@ -90,6 +119,7 @@ export default defineBackground(() => {
       const via = detect(d.url, ct);
       if (via !== 'content-type') return undefined; // đường URL đã do listener trên lo
       void record({
+        kind: 'manifest',
         page: pageOf(d),
         host: new URL(d.url).hostname,
         url: d.url,
@@ -102,6 +132,12 @@ export default defineBackground(() => {
     { urls: ['<all_urls>'] },
     ['responseHeaders'],
   );
+
+  // MV3 thu hồi service worker liên tục; seed lại danh sách host manifest từ
+  // storage, nếu không thì sau mỗi lần thu hồi sẽ mất khả năng nhận diện segment.
+  void browser.storage.local.get('hits').then(({ hits = [] }) => {
+    for (const h of hits as Hit[]) if (h.kind === 'manifest') manifestHosts.add(h.host);
+  });
 
   console.log('[probe] armed — mở site cần đo, rồi bấm icon extension để xem kết quả');
 });
