@@ -5,6 +5,7 @@ from pathlib import Path
 from extractors.factory import ExtractorFactory
 from downloaders.ytdlp import YtDlpDownloader
 from services.history_service import HistoryService
+from utils import paths
 from utils.logger import Logger
 from ui.interactive import InteractivePrompt
 from core.models import VideoInfo
@@ -113,6 +114,39 @@ class DownloadService:
                 self.history.update_task(task_id, status="failed", error_msg="Video information extraction failed.")
             return False
 
+        return self.process_video_infos(
+            video_infos,
+            concurrency=concurrency,
+            output_dir=output_dir,
+            interactive=interactive,
+            format_id=format_id,
+            progress_callback=progress_callback,
+            task_id=task_id,
+            process_callback=process_callback,
+        )
+
+    def process_video_infos(self, video_infos: List[VideoInfo], concurrency: int = 2,
+                            output_dir: Optional[str] = None, interactive: bool = True,
+                            format_id: Optional[str] = None,
+                            progress_callback: Optional[Callable[[dict], None]] = None,
+                            task_id: Optional[str] = None,
+                            process_callback: Optional[Callable] = None) -> bool:
+        """
+        Tải từ VideoInfo đã dựng sẵn, BỎ QUA bước extract.
+
+        Tách ra từ process_url để browser extension dùng được (ADR 0005 B1):
+        extension đã quan sát được manifest trong session thật của người dùng rồi,
+        nên bắt app mở lại Chromium và vượt Cloudflare lần nữa là lãng phí ~30s và
+        tự chuốc lấy một lớp lỗi không cần thiết.
+
+        process_url() giờ chỉ là: extract rồi gọi hàm này. Đường cũ giữ nguyên
+        cho CLI/Desktop và cho chính extension khi nó không bắt được manifest
+        (ADR 0005 B9).
+        """
+        if self._is_cancel_requested(task_id):
+            self.history.update_task(task_id, status="cancelled")
+            return False
+
         # Determine target directory
         base_dir = output_dir if output_dir else str(Path.home() / "Downloads" / "downloader")
         is_playlist = len(video_infos) > 1 and video_infos[0].playlist_name is not None
@@ -125,7 +159,7 @@ class DownloadService:
             target_dir = base_dir
 
         # Sync archive file with actual disk content
-        archive_path = os.path.join(Path(__file__).parent.parent, "db", "ytdlp_archive.txt")
+        archive_path = str(paths.db_dir() / "ytdlp_archive.txt")
         sync_archive_with_disk(video_infos, target_dir, archive_path)
 
         # Single video handling
@@ -161,7 +195,7 @@ class DownloadService:
 
             self.history.save_record(
                 title=final_title,
-                url=url,
+                url=video_infos[0].page_url,
                 m3u8_url=video_infos[0].m3u8_url,
                 format_id=format_id or "best",
                 status=status,
@@ -241,7 +275,9 @@ class DownloadService:
 
             self.history.save_record(
                 title=final_title,
-                url=url,
+                # Per-video, không phải video_infos[0]: đây là vòng lặp, mỗi
+                # dòng history là một video riêng.
+                url=video_info.page_url,
                 m3u8_url=video_info.m3u8_url,
                 format_id=format_id or "best",
                 status=status,

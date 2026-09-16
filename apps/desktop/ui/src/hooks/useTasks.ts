@@ -33,9 +33,11 @@ export function useTasks() {
     });
   }, []);
 
-  const attachStream = useCallback((taskId: string) => {
+  const attachStream = useCallback((taskId: string, streamToken: string) => {
     if (streamsRef.current.has(taskId)) return;
-    const es = new EventSource(`${api.getBaseUrl()}/downloads/${taskId}/stream`);
+    // Token đi qua query string vì EventSource không gửi được header (B13).
+    const url = `${api.getBaseUrl()}/downloads/${taskId}/stream?token=${encodeURIComponent(streamToken)}`;
+    const es = new EventSource(url);
     es.onmessage = (ev) => {
       const data = JSON.parse(ev.data) as ProgressEvent;
       patchTask(taskId, {
@@ -85,7 +87,12 @@ export function useTasks() {
               outputPath: t.output_path,
             },
           }));
-          if (!TERMINAL_STATUSES.has(t.status)) attachStream(taskId);
+          if (!TERMINAL_STATUSES.has(t.status)) {
+            // Token cũ đã bị tiêu thụ ở phiên trước — phải xin cái mới.
+            void api.refreshStreamToken(taskId).then((r) => {
+              if (r?.stream_token) attachStream(taskId, r.stream_token);
+            });
+          }
         } catch {
           // Task no longer exists server-side (e.g. db reset) — drop it silently.
         }
@@ -114,7 +121,7 @@ export function useTasks() {
         outputPath: null,
       },
     }));
-    attachStream(result.task_id);
+    attachStream(result.task_id, result.stream_token);
     return result.task_id;
   }, [attachStream]);
 

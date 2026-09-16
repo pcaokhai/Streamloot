@@ -76,12 +76,26 @@ export function getBaseUrl(): string {
 export interface StartDownloadResult {
   task_id: string;
   message: string;
+  /**
+   * Token dùng-một-lần cho GET /downloads/{id}/stream. EventSource không set
+   * được header Authorization nên stream xác thực bằng query string thay vì
+   * Bearer token (ADR 0005 B13).
+   */
+  stream_token: string;
 }
 
 export function startDownload(url: string, formatId: string | null): Promise<StartDownloadResult | null> {
   const body: { url: string; format_id?: string } = { url };
   if (formatId) body.format_id = formatId;
   return request<StartDownloadResult>("/downloads", { method: "POST", body: JSON.stringify(body) });
+}
+
+/**
+ * Xin token stream mới cho task đang chạy. Token là dùng-một-lần nên sau khi mở
+ * lại app, task khôi phục từ storage phải xin token mới mới nối lại stream được.
+ */
+export function refreshStreamToken(taskId: string): Promise<{ stream_token: string } | null> {
+  return request<{ stream_token: string }>(`/downloads/${taskId}/stream-token`, { method: "POST" });
 }
 
 export function getTask(taskId: string): Promise<TaskRecord | null> {

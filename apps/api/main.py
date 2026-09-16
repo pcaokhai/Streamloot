@@ -1,6 +1,7 @@
 import os
 import sys
 import queue
+import secrets
 import signal
 import subprocess
 import threading
@@ -11,7 +12,8 @@ from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, Dict
+from threading import Lock
+from typing import List, Optional, Dict
 import asyncio
 from sse_starlette.sse import EventSourceResponse
 
@@ -23,6 +25,7 @@ from services.download_service import DownloadService
 from services.history_service import HistoryService
 from extractors.factory import ExtractorFactory
 from downloaders.ytdlp import YtDlpDownloader
+from core.models import VideoInfo
 from utils.ytdlp_version import check_ytdlp_update
 from utils.logger import Logger
 
@@ -33,7 +36,50 @@ API_KEY = os.environ["API_KEY"]
 # Fail closed: with no explicit allowlist, allow no origins rather than "*".
 _allowed_origins = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
 
+# B5 (ADR 0005) — origin của extension khai riêng để không phải nhét chung vào
+# CORS_ALLOWED_ORIGINS mà desktop app đang tự đặt lúc khởi động.
+#
+# CỐ Ý không dùng allow_origin_regex "chrome-extension://.*": như thế BẤT KỲ
+# extension nào người dùng cài cũng gọi được backend này. Phải ghi cứng đúng ID.
+# Muốn ID cố định giữa các lần load unpacked thì pin `key` trong manifest
+# (ADR 0006 §4.2).
+_extension_ids = [i.strip() for i in os.getenv("STREAMLOOT_EXTENSION_IDS", "").split(",") if i.strip()]
+_allowed_origins += [
+    i if i.startswith("chrome-extension://") else f"chrome-extension://{i}"
+    for i in _extension_ids
+]
+
 security = HTTPBearer()
+
+# B13 (ADR 0005 §6.3.1) — EventSource của trình duyệt không set được header
+# Authorization, nên endpoint stream trước đây là endpoint DUY NHẤT không xác
+# thực. Với desktop app tự gọi chính nó thì tạm chấp nhận được; với extension
+# chạy trên mọi trang người dùng mở thì bề mặt tấn công rộng hơn hẳn.
+#
+# Thay vì bỏ EventSource (phải viết lại phần đọc stream ở cả desktop UI lẫn
+# extension), phát một token dùng-một-lần gắn với đúng task_id, truyền qua query
+# string. Token bị huỷ ngay khi dùng.
+_stream_tokens: Dict[str, str] = {}
+_stream_tokens_lock = Lock()
+
+
+def issue_stream_token(task_id: str) -> str:
+    token = secrets.token_urlsafe(32)
+    with _stream_tokens_lock:
+        _stream_tokens[task_id] = token
+    return token
+
+
+def consume_stream_token(task_id: str, token: Optional[str]) -> bool:
+    """Đổi token lấy quyền đọc stream. So sánh hằng thời gian, dùng xong là huỷ."""
+    if not token:
+        return False
+    with _stream_tokens_lock:
+        expected = _stream_tokens.get(task_id)
+        if expected is None or not secrets.compare_digest(expected, token):
+            return False
+        del _stream_tokens[task_id]
+        return True
 
 def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
     if credentials.credentials != API_KEY:
@@ -121,6 +167,38 @@ class DownloadRequest(BaseModel):
     format_id: Optional[str] = None
 
 
+class VideoInfoPayload(BaseModel):
+    """
+    VideoInfo do client dựng sẵn — phản chiếu core.models.VideoInfo (ADR 0005 B1).
+
+    Không có `cookies`: phép đo B14 (§7.3) cho thấy mọi host phục vụ byte media
+    đều không nhận cookie, nên extension không cần xin quyền `cookies` của Chrome.
+    Trường `cookies` vẫn còn trong core.models.VideoInfo cho đường headless dùng.
+    """
+    title: str
+    m3u8_url: str
+    page_url: str
+    referer: Optional[str] = None
+    origin: Optional[str] = None
+    user_agent: Optional[str] = None
+    playlist_name: Optional[str] = None
+    video_id: Optional[str] = None
+    disable_fixup: bool = False
+    embed_metadata: bool = True
+    clean_disguised_ts: bool = False
+    extra_ytdlp_args: List[str] = []
+
+    def to_video_info(self) -> VideoInfo:
+        return VideoInfo(**self.model_dump())
+
+
+class PreparedDownloadRequest(BaseModel):
+    video_info: VideoInfoPayload
+    concurrency: int = 4
+    output_dir: Optional[str] = None
+    format_id: Optional[str] = None
+
+
 # --- Background Task Worker ---
 def run_download_task(task_id: str, req: DownloadRequest):
     service = DownloadService()
@@ -170,6 +248,46 @@ def run_download_task(task_id: str, req: DownloadRequest):
             registry.cleanup(task_id)
 
 
+def run_prepared_task(task_id: str, req: PreparedDownloadRequest):
+    """Giống run_download_task nhưng bỏ qua extract (ADR 0005 B1)."""
+    service = DownloadService()
+
+    def progress_callback(data: dict):
+        registry.broadcast_sync(task_id, data)
+        if "completed" in data:
+            avg_speed = data.get("speed") if data.get("status") == "completed" else None
+            history.update_task(task_id, status="downloading", progress=data["completed"], avg_speed=avg_speed)
+
+    def process_callback(process: subprocess.Popen):
+        registry.set_process(task_id, process)
+
+    with _download_slots:
+        try:
+            service.process_video_infos(
+                [req.video_info.to_video_info()],
+                concurrency=req.concurrency,
+                output_dir=req.output_dir,
+                interactive=False,
+                format_id=req.format_id,
+                progress_callback=progress_callback,
+                task_id=task_id,
+                process_callback=process_callback,
+            )
+        finally:
+            final_task = history.get_task(task_id)
+            final_status = final_task["status"] if final_task else "failed"
+            registry.broadcast_sync(task_id, {
+                "status": final_status,
+                "description": final_status.capitalize(),
+                "completed": (final_task or {}).get("progress") or 0.0,
+                "speed": (final_task or {}).get("avg_speed") or "--",
+                "eta": "--",
+                "title": (final_task or {}).get("title"),
+                "output_path": (final_task or {}).get("output_path"),
+            })
+            registry.cleanup(task_id)
+
+
 # --- Endpoints ---
 @app.post("/api/v1/downloads", dependencies=[Depends(verify_api_key)])
 async def start_download(req: DownloadRequest, background_tasks: BackgroundTasks):
@@ -181,7 +299,34 @@ async def start_download(req: DownloadRequest, background_tasks: BackgroundTasks
 
     background_tasks.add_task(run_download_task, task_id, req)
 
-    return {"task_id": task_id, "message": "Download started"}
+    return {
+        "task_id": task_id,
+        "message": "Download started",
+        # B13: EventSource không gửi được header, nên stream dùng token này.
+        "stream_token": issue_stream_token(task_id),
+    }
+
+
+@app.post("/api/v1/downloads/prepared", dependencies=[Depends(verify_api_key)])
+async def start_prepared_download(req: PreparedDownloadRequest, background_tasks: BackgroundTasks):
+    """
+    Tải từ VideoInfo client đã dựng sẵn — bỏ qua bước extract phía server.
+
+    Dành cho browser extension: nó đã quan sát được manifest trong session thật
+    của người dùng, nên bắt app mở lại Chromium và vượt Cloudflare lần nữa là
+    lãng phí ~30s và tự chuốc thêm một lớp lỗi.
+
+    Endpoint cũ /api/v1/downloads VẪN GIỮ (ADR 0005 B9): extension không bắt được
+    manifest thì gửi URL trần sang đó để app dùng đường headless như cũ.
+    """
+    task_id = str(uuid.uuid4())
+    history.create_task(task_id, req.video_info.page_url)
+    background_tasks.add_task(run_prepared_task, task_id, req)
+    return {
+        "task_id": task_id,
+        "message": "Download started",
+        "stream_token": issue_stream_token(task_id),
+    }
 
 
 @app.get("/api/v1/downloads/{task_id}", dependencies=[Depends(verify_api_key)])
@@ -271,8 +416,30 @@ def resume_download(task_id: str):
     return {"task_id": task_id, "message": "Resumed"}
 
 
+@app.post("/api/v1/downloads/{task_id}/stream-token", dependencies=[Depends(verify_api_key)])
+def refresh_stream_token(task_id: str):
+    """
+    Cấp token stream mới cho một task đang chạy.
+
+    Cần vì token là dùng-một-lần: sau khi mở lại app, client khôi phục các task
+    còn dở và phải nối lại stream, nhưng token cũ đã bị tiêu thụ. Endpoint này
+    được bảo vệ bằng Bearer API key như mọi endpoint khác, nên việc cấp lại
+    không nới lỏng gì.
+    """
+    task = history.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Unknown task_id")
+    if task["status"] in HistoryService.TERMINAL_STATUSES:
+        raise HTTPException(status_code=409, detail="Task already finished")
+    return {"stream_token": issue_stream_token(task_id)}
+
+
 @app.get("/api/v1/downloads/{task_id}/stream")
-async def stream_progress(task_id: str):
+async def stream_progress(task_id: str, token: Optional[str] = None):
+    # Không dùng Depends(verify_api_key) được: EventSource không gửi header.
+    # Token dùng-một-lần do endpoint tạo task phát ra (B13).
+    if not consume_stream_token(task_id, token):
+        raise HTTPException(status_code=401, detail="Invalid or missing stream token")
     q = registry.get_queue(task_id)
 
     async def event_generator():

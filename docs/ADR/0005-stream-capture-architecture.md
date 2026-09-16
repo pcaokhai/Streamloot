@@ -532,7 +532,7 @@ Nhưng làm được, không thêm dependency:
 |---|---|---|
 | **0** | Extension probe ~50 dòng, chỉ `console.log` request khớp manifest, mở 3 site | **Cổng chặn.** Một buổi tối. Không bắt được thì dừng, khỏi tốn gì thêm |
 | **1** | B2 + B3 + B4 | App chạy nền được, đóng cửa sổ không chết |
-| **2** | B1 + B5 + B9 + **B13** | `curl` giả lập extension tải được, cả 2 đường, và luồng SSE đã xác thực |
+| **2** | ✅ B1 + B5 + B9 + **B13** | **Xong 2026-09-16.** `curl` giả lập extension tải được cả 2 đường; SSE trả 401 khi thiếu token |
 | **3** | Nhóm A + B7 + B8 + B12 | One-click capture chạy thật |
 | **4** | B6 + B10 + B11 | Dùng được hàng ngày |
 
