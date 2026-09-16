@@ -183,21 +183,46 @@ def _startup_ytdlp_update_check():
 
 # --- State Management for SSE + live process handles ---
 class TaskRegistry:
+    """
+    Fan-out: MỖI người nghe một hàng đợi riêng.
+
+    Trước đây một task chỉ có MỘT Queue và `stream_progress` `get()` phá huỷ —
+    hai người nghe cùng lúc (cửa sổ app `hydrate()` nối vào task do extension
+    khởi động và đang stream) thì mỗi sự kiện chỉ rơi vào một trong hai, cả hai
+    cùng nhảy số sai, và bên không nhận được sự kiện cuối sẽ lặp `get()` mãi mãi
+    — rò thread, stream không bao giờ đóng.
+
+    Thread-safety: `broadcast_sync` chạy trên thread worker tải, còn
+    subscribe/unsubscribe chạy từ endpoint async. Lock chỉ bảo vệ danh sách và
+    KHÔNG giữ khi đang `put` (Queue vô hạn nên `put` không chặn, nhưng vẫn chụp
+    ảnh danh sách rồi mới đẩy để không ôm lock qua lời gọi bên ngoài).
+    """
+
     def __init__(self):
-        self.queues: Dict[str, queue.Queue] = {}
+        self.subscribers: Dict[str, List[queue.Queue]] = {}
         self.processes: Dict[str, subprocess.Popen] = {}
         self._lock = threading.Lock()
 
-    def get_queue(self, task_id: str) -> queue.Queue:
+    def subscribe(self, task_id: str) -> queue.Queue:
+        q: queue.Queue = queue.Queue()
         with self._lock:
-            if task_id not in self.queues:
-                self.queues[task_id] = queue.Queue()
-            return self.queues[task_id]
+            self.subscribers.setdefault(task_id, []).append(q)
+        return q
+
+    def unsubscribe(self, task_id: str, q: queue.Queue):
+        with self._lock:
+            qs = self.subscribers.get(task_id)
+            if not qs:
+                return
+            if q in qs:
+                qs.remove(q)
+            if not qs:
+                self.subscribers.pop(task_id, None)
 
     def broadcast_sync(self, task_id: str, data: dict):
         with self._lock:
-            q = self.queues.get(task_id)
-        if q:
+            qs = list(self.subscribers.get(task_id, ()))
+        for q in qs:
             q.put(data)
 
     def set_process(self, task_id: str, process: subprocess.Popen):
@@ -209,8 +234,10 @@ class TaskRegistry:
             return self.processes.get(task_id)
 
     def cleanup(self, task_id: str):
+        # An toàn khi gọi ngay sau sự kiện cuối: mỗi subscriber giữ tham chiếu
+        # hàng đợi của chính nó, sự kiện đã nằm trong đó và vẫn rút ra được.
         with self._lock:
-            self.queues.pop(task_id, None)
+            self.subscribers.pop(task_id, None)
             self.processes.pop(task_id, None)
 
 registry = TaskRegistry()
@@ -544,18 +571,23 @@ async def stream_progress(
             f"token={'có' if token else 'không'}, Origin={origin!r}"
         )
         raise HTTPException(status_code=401, detail="Invalid or missing stream credentials")
-    q = registry.get_queue(task_id)
+    q = registry.subscribe(task_id)
 
     async def event_generator():
-        while True:
-            try:
-                # Use to_thread to prevent blocking the async event loop
-                data = await asyncio.to_thread(q.get, timeout=1.0)
-                yield {"data": json.dumps(data)}
-                if data.get("status") in ["completed", "failed", "cancelled"]:
-                    break
-            except queue.Empty:
-                continue
+        try:
+            while True:
+                try:
+                    # Use to_thread to prevent blocking the async event loop
+                    data = await asyncio.to_thread(q.get, timeout=1.0)
+                    yield {"data": json.dumps(data)}
+                    if data.get("status") in ["completed", "failed", "cancelled"]:
+                        break
+                except queue.Empty:
+                    continue
+        finally:
+            # Client ngắt giữa chừng thì generator bị đóng ở đây — không gỡ ra
+            # là hàng đợi mồ côi cứ lớn mãi theo mỗi sự kiện phát ra.
+            registry.unsubscribe(task_id, q)
 
     return EventSourceResponse(event_generator())
 
