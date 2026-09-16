@@ -23,6 +23,7 @@ Extension hiện bắt được stream và tải được, nhưng dừng ở đ�
 | Panel chỉ hiện "chất lượng tốt nhất" | Danh sách format không lên được vì trước đây gọi sai đường |
 | Không tải được riêng âm thanh | `yt-dlp` làm được, UI chưa phơi ra |
 | Menu bar không biết gì về download | Đóng trình duyệt là mù hẳn về tiến trình |
+| Cửa sổ app chỉ thấy download của chính nó | Tải từ extension hay CLI thì cửa sổ app không hay biết |
 
 Thêm hai khoản nợ kỹ thuật cần cắt trong cùng đợt (§8).
 
@@ -61,7 +62,8 @@ header `X-Streamloot-Extension-Id`. Đã ghi ở ADR 0005 §7.5.
 | D2 | **Danh sách download là toàn cục** | Download sống ở backend chứ không sống trong tab; hiển thị theo tab là nói dối về nơi nó chạy |
 | D3 | **Nút nổi trên video → panel CHỈ chọn format. Quản lý nằm ở popup** | Panel sống trong trang người khác nên phải nhỏ; popup là bề mặt của riêng extension nên chứa được tab |
 | D4 | **Polling, không streaming** | §2.1. B (keep-alive) không sửa được giới hạn 5 phút; C (offscreen) không có `reason` hợp lệ cho việc giữ kết nối mạng |
-| D5 | **Menu bar hiện MỘT video đang tải + pause/resume/stop, xong thì ẩn** | Bề mặt duy nhất còn lại khi đóng trình duyệt. Một dòng là đủ để liếc; danh sách đầy đủ ở panel |
+| D5 | **Menu bar hiện MỘT video đang tải + pause/resume/stop, xong thì ẩn** | Bề mặt duy nhất còn lại khi đóng trình duyệt. Một dòng là đủ để liếc; danh sách đầy đủ ở popup |
+| D6 | **Cửa sổ app thấy mọi download và mọi lịch sử, bất kể nguồn** | Nó là bề mặt đầy đủ nhất; thấy thiếu là sai. Kéo theo xoá `localStorage` ở `useTasks.ts` |
 
 ## 4. Kiến trúc
 
@@ -83,13 +85,18 @@ header `X-Streamloot-Extension-Id`. Đã ghi ở ADR 0005 §7.5.
 │ 1 video + pause/stop     │──► đọc thẳng HistoryService, KHÔNG qua HTTP
 │ dựng lại mỗi lần mở      │    (cùng tiến trình — xem §5.4)
 └──────────────────────────┘
+
+┌─ Cửa sổ app (React) ─────┐
+│ MỌI download, mọi nguồn  │──► HTTP + EventSource (cửa sổ sống lâu nên
+│ MỌI lịch sử, có nhãn     │    không dính giới hạn §2.1 — xem §5.5)
+└──────────────────────────┘
 ```
 
 ### 4.1. Ai sở hữu cái gì
 
 | Dữ liệu | Nguồn sự thật | Cache |
 |---|---|---|
-| Task đang chạy (tiến trình, trạng thái) | Backend (`download_tasks`) | `storage.session` trong SW |
+| Task đang chạy (tiến trình, trạng thái) | Backend (`download_tasks`) | `storage.session` trong SW. Cửa sổ app **không cache** — xem §5.5 |
 | Lịch sử đã tải xong | Backend (`download_history`) | `storage.local` trong SW, **20 mục gần nhất** |
 | Manifest bắt được theo tab | Service worker | `storage.session` |
 | Cấu hình (cổng, concurrency) | `storage.local` | — |
@@ -107,6 +114,7 @@ gọi `/downloads/active`.
 | Không mở gì, có task chạy | **60s** qua `chrome.alarms` | Đủ để badge và cache không lệch quá xa |
 | Không có task nào | **không poll** | Không đốt tài nguyên vô ích |
 | Menu bar macOS | **không poll bao giờ** | macOS gọi `menuNeedsUpdate_` ngay trước khi hiện menu — đọc một phát tại đúng thời điểm đó (§5.4) |
+| Cửa sổ app | **`EventSource`**, không poll | Cửa sổ sống lâu nên không dính giới hạn §2.1. Làm mới danh sách khi mở và khi `shown` (§5.5) |
 
 Poll dừng ngay khi mọi task về trạng thái kết thúc.
 
@@ -288,6 +296,50 @@ Quy tắc:
 Ba nút gọi thẳng service nội bộ, **không qua HTTP** — app đang ở trong cùng tiến
 trình, đi vòng qua chính API của mình là thừa.
 
+### 5.5. Cửa sổ app macOS
+
+Yêu cầu: cửa sổ app phải thấy **mọi** download, bất kể khởi động từ đâu — chính
+nó, extension, hay CLI. Và mở cửa sổ lên giữa lúc đang tải thì phải thấy tiến
+trình đầy đủ.
+
+**Hiện tại nó không làm được.** `useTasks.ts` lưu danh sách task id vào
+`localStorage` rồi khôi phục từ đó, nên chỉ biết những task **do chính nó khởi
+động**. Task từ extension hay CLI hoàn toàn vô hình.
+
+**Cách sửa lại xoá được code.** `/downloads/active` (§6.2) đã là nguồn sự thật cho
+"đang có gì chạy", nên `localStorage` kia thành thừa:
+
+| Trước | Sau |
+|---|---|
+| Lưu task id vào `localStorage` mỗi khi danh sách đổi | **Xoá.** Không lưu gì |
+| Lúc khởi động đọc `localStorage` rồi `getTask` từng cái | Gọi một lần `/downloads/active` |
+| Chỉ thấy task của chính mình | Thấy mọi task, mọi nguồn |
+
+Đây là đúng nguyên tắc D1 áp cho desktop: backend sở hữu, client phản chiếu.
+
+**Ba thời điểm làm mới:**
+
+| Khi nào | Vì sao |
+|---|---|
+| Cửa sổ khởi động | Dựng trạng thái ban đầu |
+| Sự kiện `shown` của cửa sổ | B2 cho phép ẩn cửa sổ mà app vẫn chạy — ẩn xong mở lại có thể đã khác rất nhiều |
+| Sau khi tự khởi động một download | Như hiện tại |
+
+Desktop **giữ `EventSource`** chứ không chuyển sang polling: cửa sổ sống lâu, không
+dính giới hạn của service worker ở §2.1. Với task nó không tự khởi động (nên không
+có token), xin token qua `POST /downloads/{id}/stream-token` — cơ chế này đã có sẵn.
+
+**Lịch sử hiện mọi nguồn**, kèm nhãn để phân biệt:
+
+```
+Tên video            ✓  Desktop    2 phút trước
+Tên video khác       ✓  Extension  1 giờ trước
+Tên video nữa        ✗  CLI        Hôm qua
+```
+
+Bản ghi cũ không có `source` hiện `—` (§6.1: không backfill vì không có cách nào
+biết ngược).
+
 ## 6. Thay đổi backend
 
 ### 6.1. Cột `source` (D1)
@@ -308,7 +360,7 @@ backfill, vì không có cách nào biết ngược.
 | `GET /api/v1/downloads/active` | **Mới.** Trả mọi task chưa kết thúc, **bao gồm cả `paused`**. Đường hồi phục khi service worker bị thu hồi |
 | `GET /api/v1/history` | Thêm tham số `?source=` để lọc |
 | `POST /api/v1/downloads/prepared` | Ghi `source='extension'` |
-| `POST /api/v1/downloads` | Nhận `source` tuỳ chọn, mặc định `unknown` |
+| `POST /api/v1/downloads` | Nhận `source` tuỳ chọn, mặc định `unknown`. Desktop UI gửi `desktop`, CLI gửi `cli` |
 
 `pause` / `resume` / `cancel` **không đổi** — đã có và đúng ngữ nghĩa:
 
@@ -336,6 +388,7 @@ backfill, vì không có cách nào biết ngược.
 | Đường xác thực qua `Origin` trong `verify_client` và `stream_progress` | §2.3 — extension không bao giờ gửi `Origin`. Nhánh này không thể khớp, giữ lại chỉ gây hiểu nhầm là nó đang có tác dụng |
 | `streamProgress` trong `lib/api.ts` của extension | D4 — thay bằng polling. Giữ lại là để một quả mìn hẹn giờ 5 phút trong code |
 | `startDownloadByUrl` nếu vẫn không dùng | Viết cho B9 nhưng chưa nối vào UI. Nối vào hoặc bỏ, đừng để lơ lửng |
+| `localStorage` lưu task id ở `useTasks.ts` (desktop) | §5.5 — `/downloads/active` thay thế hoàn toàn. Giữ lại là hai nguồn sự thật cho cùng một thứ |
 
 **Không bỏ** `GET /api/v1/formats` (đường extract từ URL): desktop UI vẫn dùng, và
 nó là đường B9 cho site mà extension bó tay.
@@ -360,6 +413,9 @@ và activation policy.
 | Thủ công | Pause giữa chừng, đợi, resume — file cuối cùng phải nguyên vẹn |
 | Thủ công | **Đóng hẳn trình duyệt** trong lúc tải, mở menu bar — phải thấy đúng tiến trình và bấm tạm dừng được |
 | Thủ công | Tải xong, mở lại menu bar — khối download phải biến mất hoàn toàn |
+| Thủ công | Bắt đầu tải **từ extension**, mở cửa sổ app — phải thấy tiến trình đang chạy |
+| Thủ công | Bắt đầu tải **từ CLI**, mở cửa sổ app — phải thấy nó trong danh sách |
+| Thủ công | Ẩn cửa sổ app, tải xong một file, mở lại — lịch sử phải có nó kèm đúng nhãn nguồn |
 
 ## 10. Không làm (YAGNI)
 
