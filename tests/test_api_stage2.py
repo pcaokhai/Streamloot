@@ -82,6 +82,20 @@ class TestPreparedDownload(unittest.TestCase):
         dl.assert_called_once()
         get_extractor.assert_not_called()
 
+    def test_source_flows_through_to_history(self):
+        """Nguồn phải đi hết đường từ lời gọi tới bản ghi lịch sử."""
+        from services.download_service import DownloadService
+
+        svc = DownloadService()
+        vi = api_main.VideoInfoPayload(**PAYLOAD).to_video_info()
+        with patch.object(svc.downloader, "download", return_value="/tmp/out.mp4"), \
+             patch("services.download_service.sync_archive_with_disk"), \
+             patch("services.download_service.is_video_on_disk", return_value=False), \
+             patch.object(svc.history, "save_record") as save:
+            svc.process_video_infos([vi], interactive=False, source="extension")
+
+        self.assertEqual(save.call_args.kwargs["source"], "extension")
+
 
 class TestStreamToken(unittest.TestCase):
     """B13 — siết xác thực cho luồng SSE."""

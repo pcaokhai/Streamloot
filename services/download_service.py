@@ -89,7 +89,8 @@ class DownloadService:
                     interactive: bool = True, format_id: Optional[str] = None,
                     progress_callback: Optional[Callable[[dict], None]] = None,
                     task_id: Optional[str] = None,
-                    process_callback: Optional[Callable] = None) -> bool:
+                    process_callback: Optional[Callable] = None,
+                    source: str = "unknown") -> bool:
         """
         Processes the complete flow: Get Extractor -> Extract VideoInfo -> [Optional UI] -> Download Video
 
@@ -123,6 +124,7 @@ class DownloadService:
             progress_callback=progress_callback,
             task_id=task_id,
             process_callback=process_callback,
+            source=source,
         )
 
     def process_video_infos(self, video_infos: List[VideoInfo], concurrency: int = 2,
@@ -130,7 +132,8 @@ class DownloadService:
                             format_id: Optional[str] = None,
                             progress_callback: Optional[Callable[[dict], None]] = None,
                             task_id: Optional[str] = None,
-                            process_callback: Optional[Callable] = None) -> bool:
+                            process_callback: Optional[Callable] = None,
+                            source: str = "unknown") -> bool:
         """
         Tải từ VideoInfo đã dựng sẵn, BỎ QUA bước extract.
 
@@ -200,7 +203,8 @@ class DownloadService:
                 format_id=format_id or "best",
                 status=status,
                 output_path=output_path,
-                playlist_name=None
+                playlist_name=None,
+                source=source,
             )
             if task_id:
                 self.history.update_task(task_id, status="completed" if success else "failed",
@@ -282,7 +286,8 @@ class DownloadService:
                 format_id=format_id or "best",
                 status=status,
                 output_path=output_path,
-                playlist_name=video_info.playlist_name
+                playlist_name=video_info.playlist_name,
+                source=source,
             )
             if task_id:
                 self.history.update_task(task_id, status="downloading",
