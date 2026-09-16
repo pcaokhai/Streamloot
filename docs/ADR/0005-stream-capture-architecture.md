@@ -579,25 +579,54 @@ Plugin B vốn đã phải quét iframe để xử lý.
 trong URL. Giữ B12 vì nó rẻ và phòng site khác, nhưng hạ ưu tiên: nó không phải
 thứ làm cho 3 site này chạy được.
 
-### 7.3. Khoảng cách thật đã tìm ra: Plugin C
+### 7.3. B14 — cookie: ĐÃ ĐO XONG, kết luận là **không cần**
 
-Plugin C **có** thu cookie (`page.cookies()`) và truyền vào `VideoInfo.cookies`.
-Probe cho thấy trình duyệt **không gửi cookie nào** trên request manifest của site
-đó — mà playback vẫn chạy bình thường.
+Plugin C thu cookie (`page.cookies()`) và truyền vào `VideoInfo.cookies`, nhưng
+probe cho thấy trình duyệt không gửi cookie trên request manifest. Câu hỏi treo
+lại: cookie thừa, hay cần cho segment mà probe chưa quan sát?
 
-Hai cách giải thích, chưa phân biệt được:
+Probe được mở rộng sang request segment (B14) và đo lại. Trang đó nói chuyện với
+5 host trong lúc phát:
 
-1. **Cookie là thừa** cho manifest — CDN dùng signed URL. Plugin thu cookie theo
-   kiểu phòng thủ. Nếu đúng, extension cấp đủ và B1 không cần đường cookie.
-2. **Cookie cần cho segment**, không cần cho manifest. Probe **chỉ quan sát
-   request manifest**, không quan sát request `.ts`. Nếu đúng, extension phải thu
-   cookie qua `chrome.cookies` API thay vì dựa vào header quan sát được.
+| Host | Resource type | Ngữ cảnh gửi đi | Vai trò |
+|---|---|---|---|
+| Host manifest | `xmlhttprequest` | `origin, ua` | manifest |
+| CDN "ảnh" | **`image`** | **chỉ `ua`** | **segment ngụy trang PNG** |
+| CDN tên ngẫu nhiên | `xmlhttprequest` | `origin, ua` | shard phục vụ byte |
+| **Host của chính trang** | `xmlhttprequest` | **`cookie`, origin, ua** | API nội bộ của trang |
+| Analytics bên thứ ba | `xmlhttprequest` | `origin, ua` | nhiễu |
 
-Plugin C cũng thiếu `referer` — nó truyền `referer` nhưng trình duyệt không gửi.
+**Kết luận: mọi host phục vụ byte media đều không nhận cookie.**
 
-**Đây là giới hạn của probe, không phải của Phương án 2.** Cần một phép đo tiếp
-theo trước khi làm B1: mở rộng bộ lọc sang `.ts` một lần, xem segment có mang
-cookie không. Nửa giờ. Ghi thành **B14**.
+Host duy nhất có cookie là host của chính trang — XHR **same-origin**, tức trang
+gọi API của nó, và trình duyệt luôn kèm cookie cho same-origin. Đó không phải
+request tải media. Đây là chỗ dễ đọc nhầm nhất của phép đo.
+
+Nghĩa là **giải thích (1) đúng: cookie là thừa** đối với việc tải. Cookie mà
+Plugin C thu nhiều khả năng cần cho chính lời gọi API lộ ra URL stream — mà trong
+mô hình extension, **extension không phải gọi lại lời gọi đó**: trang đã gọi rồi,
+extension chỉ quan sát kết quả. Nó thừa hưởng phiên đã xác thực thay vì phát lại.
+
+#### Hệ quả cho B1
+
+- **Không cần permission `cookies` trong `manifest.json`**, không cần
+  `chrome.cookies` API. Bề mặt quyền hẹp hơn hẳn — đáng kể vì Chrome Web Store
+  soi permission rất kỹ.
+- Hợp đồng dữ liệu của B1 gọn lại: `m3u8_url`, `referer`, `origin`, `user_agent`
+  là đủ. `VideoInfo.cookies` để `None` cho đường extension.
+- `VideoInfo` **không cần đổi** — trường `cookies` vẫn còn cho đường headless
+  (CLI/Desktop) dùng.
+
+#### Giới hạn của phép đo này
+
+Probe đo **thứ trình duyệt gửi đi**, không đo **thứ máy chủ bắt buộc**. Máy chủ
+vẫn có thể từ chối client ngoài trình duyệt vì lý do khác (URL ký có hạn, kiểm
+`Referer` chỉ với request lạ). Kết luận "không cần cookie" đúng ở mức: **cấp đúng
+những gì trình duyệt cấp là đủ để tái hiện**, chứ không phải "máy chủ không quan
+tâm gì".
+
+Phép thử thật nằm ở B1: gửi `VideoInfo` không cookie xuống `yt-dlp` và xem có tải
+được không. Rẻ, và lúc đó đã có sẵn hạ tầng.
 
 ### 7.4. Hệ quả
 
@@ -606,7 +635,7 @@ cookie không. Nửa giờ. Ghi thành **B14**.
 | ADR này | **Proposed → Accepted** |
 | ADR 0006 (tech stack) | **Proposed → Accepted** — WXT đã dựng được probe chạy thật, không còn là lựa chọn trên giấy |
 | B12 | Giữ, hạ ưu tiên (§7.2) |
-| **B14 (mới)** | Đo cookie trên request segment trước khi chốt hợp đồng dữ liệu của B1 (§7.3) |
+| **B14** | ✅ **Đóng** — đã đo, cookie không cần cho việc tải (§7.3). B1 bỏ được đường cookie |
 
 ---
 
@@ -666,6 +695,7 @@ cookie không. Nửa giờ. Ghi thành **B14**.
 8. **Tech stack cho extension** — xem [ADR 0006](0006-extension-tech-stack.md).
 9. **ADR 0004 cần cập nhật** sau khi B13 xong: ngoại lệ "trừ SSE stream" trong
    phần Decision không còn đúng nữa.
-10. **B14 (§7.3): request segment có mang cookie không?** Chưa biết. Phải đo trước
-    khi chốt hợp đồng dữ liệu của B1 — nếu segment cần cookie thì extension phải
-    dùng `chrome.cookies` API chứ không dựa được vào header quan sát được.
+10. ~~**B14 (§7.3): request segment có mang cookie không?**~~ **ĐÃ ĐO — không.**
+    Mọi host phục vụ byte đều không nhận cookie; host duy nhất có cookie là XHR
+    same-origin của chính trang. B1 bỏ được đường cookie và bỏ luôn permission
+    `cookies`. Phép thử cuối nằm ở chính B1 (§7.3, "Giới hạn").

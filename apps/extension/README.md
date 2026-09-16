@@ -69,8 +69,17 @@ manifest. Cookie đó cần cho segment, hay là thừa?
 | Cột Segment hiện | Kết luận |
 |---|---|
 | Không có `cookie` | Cookie là thừa. Extension cấp đủ; B1 không cần đường cookie |
-| **Có `cookie`** | Cookie cần cho segment. Extension **phải** dùng `chrome.cookies` API — header quan sát được là không đủ |
+| **Có `cookie`** | Đọc kỹ cảnh báo ngay dưới trước khi kết luận |
 | "chưa bắt được" | Chưa thấy segment nào. Bấm play và để chạy vài giây |
+
+> **Bẫy đọc nhầm — quan trọng.** Host của *chính trang* luôn xuất hiện với
+> `cookie`, vì đó là XHR **same-origin** (trang gọi API của nó) và trình duyệt
+> luôn kèm cookie cho same-origin. **Đó không phải request tải media.** Chỉ xét
+> các host *khác* tên miền trang khi trả lời câu hỏi cookie.
+
+**Kết quả đo thật (2026-09-16):** mọi host phục vụ byte đều **không** nhận cookie;
+host duy nhất có cookie là XHR same-origin của trang. B14 đóng — xem
+[ADR 0005 §7.3](../../docs/ADR/0005-stream-capture-architecture.md).
 
 Cột Segment liệt kê **từng host kèm resource type**, không gộp — gộp lại sẽ che
 mất host nào mang cookie.
