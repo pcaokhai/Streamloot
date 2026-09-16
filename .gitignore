@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+scratch/
+# Toàn bộ nội dung db/ là dữ liệu runtime riêng tư (lịch sử tải thật).
+# Giữ thư mục, bỏ nội dung.
+db/*
+!db/.gitkeep
+logs/
+.venv/
+.pytest_cache/
+.DS_Store
+apps/desktop/ui/node_modules/
+apps/desktop/ui/dist/
+apps/desktop/ui/*.tsbuildinfo
+
+# Private, non-public extractor plugins — never commit these. Deleting
+# plugins/ entirely still leaves the app working via the ExtractorFactory
+# fallback to YtDlpDefaultExtractor (see CLAUDE.md 3.1). Use the *_private.py
+# suffix (matched below) for any such plugin/test — never list one by name
+# here, or this file becomes the very thing it's meant to hide.
+plugins/*_private.py
+tests/*_private.py
+docs/**/*.private.md
+
+# macOS .app build artifacts
+/build/
+/dist/
+/packaging/vendor/
