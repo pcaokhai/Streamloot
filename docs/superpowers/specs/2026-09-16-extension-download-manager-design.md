@@ -65,7 +65,7 @@ header `X-Streamloot-Extension-Id`. Đã ghi ở ADR 0005 §7.5.
 | D4 | **Polling, không streaming** | §2.1. B (keep-alive) không sửa được giới hạn 5 phút; C (offscreen) không có `reason` hợp lệ cho việc giữ kết nối mạng |
 | D5 | **Menu bar hiện MỘT video đang tải + pause/resume/stop, xong thì ẩn** | Bề mặt duy nhất còn lại khi đóng trình duyệt. Một dòng là đủ để liếc; danh sách đầy đủ ở popup |
 | D6 | **Cửa sổ app thấy mọi download và mọi lịch sử, bất kể nguồn** | Nó là bề mặt đầy đủ nhất; thấy thiếu là sai. Kéo theo xoá `localStorage` ở `useTasks.ts` |
-| D7 | **Icon extension đổi theo trạng thái, TĨNH chứ không hoạt hình** | Hoạt hình cần bộ đếm lặp — chính là cách giữ service worker sống, đúng antipattern đã loại ở D4 |
+| D7 | **Icon có vòng tiến trình vẽ bằng `OffscreenCanvas`, ẩn khi không tải** | Vẽ theo **dữ liệu đổi**, không theo bộ đếm — nên không phạm D4. Chặn vẽ thừa bằng cách chỉ vẽ khi phần trăm đổi tới bội số 5 |
 
 ## 4. Kiến trúc
 
@@ -234,59 +234,85 @@ Bấm icon extension. Đây là nơi **quản lý**, tách hẳn khỏi trang we
 Popup **có** nút pause/resume/cancel — khác với ghi chú ở bản trước. Nó là bề mặt
 quản lý chính của extension, nên phải điều khiển được.
 
-### 5.3. Icon extension và badge
+### 5.3. Icon extension: vòng tiến trình
 
-Extension **hiện chưa có icon nào** — Chrome đang hiện mảnh ghép mặc định. Nên
-phần này gồm hai việc: tạo bộ icon, rồi thêm biến thể theo trạng thái.
+Extension **hiện chưa có icon nào** — Chrome đang hiện mảnh ghép mặc định. Phần
+này gồm hai việc: tạo icon nền, rồi vẽ vòng tiến trình quanh nó.
 
-#### Ba trạng thái icon
+#### Hành vi
 
-| Trạng thái | Icon | Khi nào |
+```
+   Rảnh              Đang tải 35%        Đang tải 80%        Xong
+    ⤓                    ◜⤓                 ◝⤓◞                 ⤓
+                      (vòng 1/3)        (vòng 4/5)        (vòng biến mất)
+```
+
+| Trạng thái | Icon |
+|---|---|
+| Không có download | Icon trần, **không có vòng** |
+| Đang tải | Icon + vòng cung chạy quanh, lấp đầy theo phần trăm |
+| Tạm dừng | Icon + vòng dừng ở mức hiện tại, **đổi sang màu xám** |
+| Vừa xong | Vòng chạy nốt tới 100% rồi **ẩn hẳn**, về icon trần |
+
+Không có chữ số phần trăm trên icon. Con số nằm ở popup và menu bar.
+
+#### Vẽ bằng gì
+
+Service worker MV3 không có DOM, **nhưng có `OffscreenCanvas`**. Vẽ icon nền +
+một cung tròn rồi đẩy qua `chrome.action.setIcon({imageData})`. Không cần thư viện,
+không cần offscreen document.
+
+#### Vì sao việc này KHÔNG phạm vào D4
+
+D4 loại bỏ mọi thứ cần bộ đếm lặp lại, vì gọi API extension theo chu kỳ chính là
+cách giữ service worker sống.
+
+Vòng tiến trình **không cần bộ đếm nào**. Nó vẽ lại khi **dữ liệu đổi**, mà dữ liệu
+đến từ nhịp poll vốn đã có ở §4.2:
+
+| Bối cảnh | Vòng cập nhật mỗi | Vì sao |
 |---|---|---|
-| **Rảnh** | Mũi tên tải, nét mảnh, đơn sắc | Không có download nào chạy |
-| **Đang tải** | Cùng hình, **tô đặc, màu nhấn** | Có ít nhất một task đang chạy |
-| **Tạm dừng** | Cùng hình, tô đặc, **màu xám** | Mọi task đang chạy đều ở trạng thái tạm dừng |
+| Popup hoặc panel đang mở | **~1s** | Đã poll sẵn ở nhịp đó |
+| Không mở gì | **~30–60s** | Theo `chrome.alarms`; thô nhưng vẫn cho biết còn sống và tới đâu |
 
-Không hiện phần trăm trên icon. Con số nằm ở popup và menu bar.
+**Không tăng nhịp poll chỉ để vòng mượt hơn.** Làm thế là quay lại đúng
+antipattern, chỉ đổi tên. Vòng mượt khi bạn đang nhìn, thô khi bạn không nhìn —
+và khi không nhìn thì cũng không ai cần mượt.
 
-#### Vì sao icon TĨNH, không hoạt hình
+#### Chặn vẽ thừa
 
-Icon hoạt hình (mũi tên chạy, vòng xoay) đẹp hơn, nhưng cần một bộ đếm lặp lại để
-vẽ từng khung. Mà **gọi API extension theo chu kỳ chính là cách giữ service worker
-sống** — đúng antipattern đã loại ở **D4** vì tài liệu Chrome nói nó chỉ dành cho
-trường hợp ngoại lệ.
+Chỉ gọi `setIcon` khi **phần trăm làm tròn tới bội số 5 thay đổi**. Một download
+vì thế tốn tối đa 20 lần vẽ, bất kể poll bao nhiêu lần. Poll ở 1s cho video 10
+phút là 600 lần poll nhưng chỉ 20 lần vẽ.
 
-Ba icon tĩnh chỉ đặt lại **khi trạng thái đổi**: bắt đầu tải, tạm dừng, xong hết.
-Không bộ đếm, không giữ service worker sống, không tốn gì giữa các lần đổi.
+#### Nhiều download cùng lúc
 
-Kỹ thuật: service worker MV3 không có DOM, nhưng **có `OffscreenCanvas`** — đủ để
-`chrome.action.setIcon({imageData})` nếu muốn sinh icon lúc chạy. Với ba trạng thái
-tĩnh thì **không cần**: ship thẳng ba tệp PNG trong `public/`, đơn giản hơn và
-không phải vẽ gì lúc chạy.
+Vòng bám **task khởi động gần nhất**, giống menu bar (D5).
+
+Đã cân nhắc lấy trung bình mọi task rồi loại: thêm một download mới sẽ kéo tổng
+phần trăm **tụt xuống**, tức vòng chạy ngược — trông như hỏng. Con số của một task
+thì luôn tăng.
 
 #### Badge
 
-Badge bổ sung cho icon chứ không lặp lại nó:
+Badge bổ sung cho vòng chứ không lặp lại:
 
 | Trạng thái | Badge | Màu nền |
 |---|---|---|
-| Có download đang chạy | Số task đang chạy | Xanh dương |
+| Có nhiều hơn 1 download đang chạy | Số task đang chạy | Xanh dương |
+| Đúng 1 download | **Trống** — vòng đã nói rồi | — |
 | Không tải, có stream bắt được trên tab này | Số stream | Xám |
 | Không có gì | Trống | — |
 
-Đang tải được ưu tiên hơn số stream bắt được — nó là thông tin cấp bách hơn.
-Badge **theo tab** cho số stream (đó là thứ gắn với trang), nhưng **toàn cục** cho
-số download (D2) — khi đang tải, mọi tab đều hiện cùng một con số.
+Số stream là **theo tab**; số download là **toàn cục** (D2).
 
 #### Asset cần tạo
 
-| Tệp | Kích thước | Ghi chú |
+| Tệp | Cỡ | Ghi chú |
 |---|---|---|
-| `icon-16/32/48/128.png` | 4 cỡ | Trạng thái rảnh, cũng là `icons` trong manifest |
-| `icon-active-16/32/48/128.png` | 4 cỡ | Đang tải |
-| `icon-paused-16/32/48/128.png` | 4 cỡ | Tạm dừng |
+| `icon-16/32/48/128.png` | 4 cỡ | Icon nền, cũng là `icons` trong manifest |
 
-Đặt trong `apps/extension/public/`, WXT tự chép sang bản build.
+Chỉ **một** bộ. Vòng tiến trình vẽ lúc chạy nên không cần biến thể tĩnh nào.
 
 ### 5.4. Menu trên menu bar (app macOS)
 
@@ -455,7 +481,9 @@ và activation policy.
 | Extension | Máy trạng thái poll: bắt đầu khi có task, dừng khi hết, đổi nhịp theo việc có ai đang xem |
 | Extension | Hồi phục: xoá sạch cache rồi gọi `/downloads/active` phải dựng lại đủ danh sách, gồm cả task đang tạm dừng |
 | Extension | `all_frames`: khung không có `<video>` phải thoát ngay, không dựng gì |
-| Extension | Icon đổi đúng ba trạng thái và **chỉ đổi khi trạng thái đổi** — không có lời gọi `setIcon` lặp lại theo chu kỳ |
+| Extension | Vòng tiến trình: vẽ đúng phần trăm, ẩn khi không có download |
+| Extension | **Chặn vẽ thừa**: poll 600 lần cho một video dài phải sinh tối đa 20 lần `setIcon` |
+| Extension | Không có lời gọi `setIcon` nào lặp theo chu kỳ khi phần trăm đứng yên |
 | Thủ công | Tải một video **dài hơn 5 phút**, đóng panel, đổi trang, mở lại — tiến trình phải còn đúng. Đây là ca mà thiết kế cũ hỏng |
 | Thủ công | Pause giữa chừng, đợi, resume — file cuối cùng phải nguyên vẹn |
 | Thủ công | **Đóng hẳn trình duyệt** trong lúc tải, mở menu bar — phải thấy đúng tiến trình và bấm tạm dừng được |
