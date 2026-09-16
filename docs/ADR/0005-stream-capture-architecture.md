@@ -631,6 +631,17 @@ tâm gì".
 Phép thử thật nằm ở B1: gửi `VideoInfo` không cookie xuống `yt-dlp` và xem có tải
 được không. Rẻ, và lúc đó đã có sẵn hạ tầng.
 
+### 7.4. Hệ quả
+
+| | |
+|---|---|
+| ADR này | **Proposed → Accepted** |
+| ADR 0006 (tech stack) | **Proposed → Accepted** — WXT đã dựng được probe chạy thật, không còn là lựa chọn trên giấy |
+| B12 | Giữ, hạ ưu tiên (§7.2) |
+| **B14** | ✅ **Đóng** — đã đo, cookie không cần cho việc tải (§7.3). B1 bỏ được đường cookie |
+
+---
+
 ### 7.5. Xác thực extension: ba lần sai trước khi đúng
 
 Vấn đề: bắt người dùng dán API key là rườm rà, mà key thì app sinh ngẫu nhiên mỗi
@@ -659,17 +670,6 @@ danh tính, không dựa vào header nào.
 cơ chế hoạt động mà chưa đo. Mỗi lần một lệnh `curl` mô phỏng đúng ngữ cảnh, hoặc
 chỉ cần ghi log ở nhánh 401, đã trả lời trong một lượt. Chính ADR này có mục
 "Claimed Limitations Need Evidence".
-
-### 7.4. Hệ quả
-
-| | |
-|---|---|
-| ADR này | **Proposed → Accepted** |
-| ADR 0006 (tech stack) | **Proposed → Accepted** — WXT đã dựng được probe chạy thật, không còn là lựa chọn trên giấy |
-| B12 | Giữ, hạ ưu tiên (§7.2) |
-| **B14** | ✅ **Đóng** — đã đo, cookie không cần cho việc tải (§7.3). B1 bỏ được đường cookie |
-
----
 
 ## 8. Consequences
 
