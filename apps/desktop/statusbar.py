@@ -137,6 +137,10 @@ def _build(on_show, on_quit, port, title, task_actions):
             'task': task_actions,
         })
         menu = AppKit.NSMenu.alloc().init()
+        # Bắt buộc: mặc định NSMenu tự bật lại mọi item có target+action hợp lệ,
+        # ghi đè setEnabled_ của ta — mục "Tạm dừng" của task 'pending' sẽ lại
+        # bấm được. Tắt đi thì setEnabled_ mới là tiếng nói cuối cùng.
+        menu.setAutoenablesItems_(False)
 
         def rebuild(m):
             _rebuild_safe(m, target, port, task_actions)
@@ -186,6 +190,7 @@ def _populate(menu, target, port, active_tasks):
         )
         toggle.setTarget_(target)
         toggle.setRepresentedObject_(dl["task_id"])
+        toggle.setEnabled_(dl.get("enabled", True))
         menu.addItem_(toggle)
 
         cancel = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(

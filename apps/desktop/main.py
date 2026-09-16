@@ -145,7 +145,15 @@ def main():
         statusbar.activate()
         # B2 cho phép ẩn cửa sổ mà app vẫn chạy, nên ẩn xong mở lại có thể đã
         # khác rất nhiều — bảo trang dựng lại danh sách.
-        window.evaluate_js("window.dispatchEvent(new Event('streamloot:refresh'))")
+        #
+        # Chỉ bọc evaluate_js: hàm này được gọi từ một ObjC action selector
+        # (_Target.onShow_), mà evaluate_js ném được (webview chưa sẵn sàng,
+        # trang đang điều hướng). Để lọt ra là mục "Mở cửa sổ Streamloot" vỡ im
+        # lặng. window.show() KHÔNG bọc — cái đó hỏng thì phải kêu to.
+        try:
+            window.evaluate_js("window.dispatchEvent(new Event('streamloot:refresh'))")
+        except Exception as e:
+            Logger.error(f"Không gửi được streamloot:refresh vào cửa sổ: {e}", exc_info=True)
 
     def quit_app():
         global _quitting

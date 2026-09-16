@@ -17,7 +17,8 @@ def build_menu_model(active_tasks: list) -> dict:
 
     Returns:
         {"download": None} khi không có gì chạy, hoặc
-        {"download": {"task_id", "label", "action"}} với action là 'pause'|'resume'.
+        {"download": {"task_id", "label", "action", "enabled"}} với action là
+        'pause'|'resume'. `enabled=False` khi hành động chưa thể thực hiện.
     """
     if not active_tasks:
         return {"download": None}
@@ -27,7 +28,8 @@ def build_menu_model(active_tasks: list) -> dict:
     if len(title) > MAX_LABEL:
         title = title[: MAX_LABEL - 1] + "…"
 
-    if task.get("status") == "paused":
+    status = task.get("status")
+    if status == "paused":
         label = f"{title} — Tạm dừng"
         action = "resume"
     else:
@@ -36,4 +38,14 @@ def build_menu_model(active_tasks: list) -> dict:
         label = f"{title} — {pct}"
         action = "pause"
 
-    return {"download": {"task_id": task["task_id"], "label": label, "action": action}}
+    # 'pending' = chưa có tiến trình con nào để tạm dừng; endpoint sẽ trả 409 và
+    # từ chỗ người dùng ngồi thì cú bấm biến mất không dấu vết. Thà hiện mục mờ
+    # đi: hành động bất khả thi thì đừng mời bấm.
+    return {
+        "download": {
+            "task_id": task["task_id"],
+            "label": label,
+            "action": action,
+            "enabled": status != "pending",
+        }
+    }

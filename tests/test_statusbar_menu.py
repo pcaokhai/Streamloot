@@ -55,6 +55,25 @@ class TestMenuModel(unittest.TestCase):
         self.assertIsNotNone(model["download"]["label"])
 
 
+    def test_pending_task_disables_the_toggle(self):
+        """
+        'pending' = chưa có tiến trình con; pause sẽ 409 và từ chỗ người dùng
+        ngồi cú bấm biến mất không dấu vết. Hiện mục mờ đi thay vì mời bấm.
+        """
+        model = build_menu_model(
+            [{"task_id": "a", "title": "T", "status": "pending", "progress": None}]
+        )
+        self.assertFalse(model["download"]["enabled"])
+
+    def test_downloading_and_paused_toggles_stay_enabled(self):
+        for status in ("downloading", "paused"):
+            with self.subTest(status=status):
+                model = build_menu_model(
+                    [{"task_id": "a", "title": "T", "status": status, "progress": 5.0}]
+                )
+                self.assertTrue(model["download"]["enabled"])
+
+
 class TestRebuildGuard(unittest.TestCase):
     """
     `_rebuild_safe` là hàng rào chống lộ exception ra ngoài `menuNeedsUpdate_`
