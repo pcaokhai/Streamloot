@@ -100,21 +100,21 @@ def verify_client(
     x_streamloot_extension_id: Optional[str] = Header(default=None),
 ):
     """
-    Nhận BA cách, đều nhắm đúng mô hình đe dọa của ADR 0004: một trang web độc
+    Nhận HAI cách, đều nhắm đúng mô hình đe dọa của ADR 0004: một trang web độc
     hại gọi ngầm tới localhost.
 
     1. `Authorization: Bearer <API_KEY>` — desktop UI và client ngoài trình duyệt.
     2. Header `X-Streamloot-Extension-Id` khớp ID đã ghim — browser extension.
-    3. `Origin` khớp ID đã ghim — dự phòng, xem ghi chú bên dưới.
 
-    **Vì sao phải dùng custom header chứ không phải `Origin`:** extension khai
+    **Vì sao dùng custom header chứ không phải `Origin`:** extension khai
     `host_permissions` cho host này, mà với host đã được cấp quyền thì Chrome cho
-    gọi thẳng, KHÔNG ràng buộc CORS, và **không gửi header `Origin`**. Đường (3)
-    vì thế không bao giờ khớp cho extension thật — giữ lại chỉ để phòng trường
-    hợp Chrome đổi hành vi. Đã đo: request từ service worker tới đây có
-    `Origin: None`.
+    gọi thẳng, KHÔNG ràng buộc CORS, và **không gửi header `Origin`**. Một nhánh
+    chấp nhận qua `Origin` vì thế không bao giờ khớp cho extension thật — đã đo:
+    request từ service worker tới đây có `Origin: None`. Tham số `origin` vẫn
+    được giữ và ghi log khi từ chối — đó là manh mối chẩn đoán khi request bị
+    401 mà không rõ vì sao.
 
-    **Vì sao (2) vẫn chặn được trang web độc hại:** trình duyệt KHÔNG cho trang
+    **Vì sao (2) chặn được trang web độc hại:** trình duyệt KHÔNG cho trang
     đặt header tuỳ ý trên request cross-origin nếu chưa qua preflight, mà
     preflight thì bị CORS allowlist chặn (origin của trang không nằm trong đó).
     Trang gửi request đơn giản không kèm header thì rơi thẳng vào 401.
@@ -129,8 +129,6 @@ def verify_client(
     if credentials is not None and secrets.compare_digest(credentials.credentials, API_KEY):
         return "api-key"
     if x_streamloot_extension_id and x_streamloot_extension_id in _extension_ids:
-        return "extension"
-    if origin and origin in _extension_origins:
         return "extension"
     # Một 401 không để lại dấu vết là không chẩn được: người dùng chỉ thấy "app
     # từ chối" mà không ai biết origin nào bị từ chối và đang mong đợi origin nào.
@@ -533,8 +531,6 @@ async def stream_progress(
         pass
     elif x_streamloot_extension_id and x_streamloot_extension_id in _extension_ids:
         pass  # extension: cùng cơ chế như mọi endpoint khác (xem verify_client)
-    elif origin and origin in _extension_origins:
-        pass
     elif not consume_stream_token(task_id, token):
         raise HTTPException(status_code=401, detail="Invalid or missing stream credentials")
     q = registry.get_queue(task_id)

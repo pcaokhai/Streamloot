@@ -221,9 +221,17 @@ class TestOriginAuth(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.status_code, 401)
 
-    def test_official_extension_origin_is_accepted(self):
-        """Đường dự phòng, giữ phòng khi Chrome đổi hành vi."""
-        self.assertEqual(api_main.verify_client(credentials=None, origin=self.OFFICIAL), "extension")
+    def test_origin_alone_is_no_longer_accepted(self):
+        """
+        Extension có host_permissions nên Chrome KHÔNG gửi Origin (đo được:
+        backend nhận Origin None). Giữ nhánh này chỉ gây hiểu nhầm là nó có
+        tác dụng.
+        """
+        with self.assertRaises(HTTPException) as ctx:
+            api_main.verify_client(
+                credentials=None, origin=self.OFFICIAL, x_streamloot_extension_id=None
+            )
+        self.assertEqual(ctx.exception.status_code, 401)
 
     def test_valid_api_key_still_accepted(self):
         from fastapi.security import HTTPAuthorizationCredentials
@@ -259,12 +267,6 @@ class TestOriginAuth(unittest.TestCase):
         res = run(api_main.stream_progress(
             "task-hdr", token=None, authorization=None, origin=None,
             x_streamloot_extension_id=self.OFFICIAL_ID,
-        ))
-        self.assertIsNotNone(res)
-
-    def test_stream_accepts_official_origin(self):
-        res = run(api_main.stream_progress(
-            "task-origin", token=None, authorization=None, origin=self.OFFICIAL
         ))
         self.assertIsNotNone(res)
 
