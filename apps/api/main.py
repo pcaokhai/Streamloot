@@ -224,6 +224,7 @@ class DownloadRequest(BaseModel):
     concurrency: int = 4
     output_dir: Optional[str] = None
     format_id: Optional[str] = None
+    source: Optional[str] = None
 
 
 class VideoInfoPayload(BaseModel):
@@ -287,6 +288,7 @@ def run_download_task(task_id: str, req: DownloadRequest):
                 progress_callback=progress_callback,
                 task_id=task_id,
                 process_callback=process_callback,
+                source=req.source or "unknown",
             )
         finally:
             # process_url doesn't push a terminal SSE event on failure/cancel
@@ -331,6 +333,7 @@ def run_prepared_task(task_id: str, req: PreparedDownloadRequest):
                 progress_callback=progress_callback,
                 task_id=task_id,
                 process_callback=process_callback,
+                source="extension",
             )
         finally:
             final_task = history.get_task(task_id)
@@ -354,7 +357,7 @@ async def start_download(req: DownloadRequest, background_tasks: BackgroundTasks
 
     # Write the task record up front so a status/history lookup right after
     # this call (or a server restart mid-download) has something to find.
-    history.create_task(task_id, req.url)
+    history.create_task(task_id, req.url, source=req.source or "unknown")
 
     background_tasks.add_task(run_download_task, task_id, req)
 
@@ -379,13 +382,24 @@ async def start_prepared_download(req: PreparedDownloadRequest, background_tasks
     manifest thì gửi URL trần sang đó để app dùng đường headless như cũ.
     """
     task_id = str(uuid.uuid4())
-    history.create_task(task_id, req.video_info.page_url)
+    history.create_task(task_id, req.video_info.page_url, source="extension")
     background_tasks.add_task(run_prepared_task, task_id, req)
     return {
         "task_id": task_id,
         "message": "Download started",
         "stream_token": issue_stream_token(task_id),
     }
+
+
+@app.get("/api/v1/downloads/active", dependencies=[Depends(verify_api_key)])
+def get_active_downloads():
+    """
+    Mọi task chưa kết thúc, gồm cả `paused`.
+
+    Nguồn sự thật cho "đang có gì chạy". Client dựng lại trạng thái từ đây sau
+    khi khởi động lại thay vì tự nhớ — xem spec D1 và D6.
+    """
+    return {"tasks": history.get_active_tasks()}
 
 
 @app.get("/api/v1/downloads/{task_id}", dependencies=[Depends(verify_api_key)])
@@ -540,8 +554,9 @@ async def stream_progress(
 
 
 @app.get("/api/v1/history", dependencies=[Depends(verify_api_key)])
-def get_history():
-    return history.get_history(limit=50)
+def get_history(source: Optional[str] = None):
+    # source=None trả mọi nguồn — cửa sổ app dùng thế (D6).
+    return history.get_history(limit=50, source=source)
 
 
 @app.delete("/api/v1/history/{record_id}", dependencies=[Depends(verify_api_key)])
