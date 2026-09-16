@@ -202,14 +202,47 @@ class HistoryService:
 
     TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
-    def get_history(self, limit: int = 50) -> list:
-        """Returns the most recent completed/failed download records."""
+    def get_active_tasks(self) -> list:
+        """
+        Mọi task chưa kết thúc, mới nhất trước.
+
+        Bao gồm cả 'paused': nó chưa xong, và người dùng cần thấy để bấm tiếp tục.
+        Đây là nguồn sự thật cho câu hỏi "đang có gì chạy" — cả cửa sổ app lẫn
+        extension đều dựng lại trạng thái từ đây thay vì tự nhớ.
+        """
+        placeholders = ",".join("?" for _ in self.TERMINAL_STATUSES)
         try:
             with self._get_connection() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute(
-                    "SELECT * FROM download_history ORDER BY created_at DESC LIMIT ?", (limit,)
+                    f"SELECT * FROM download_tasks WHERE status NOT IN ({placeholders})"
+                    " ORDER BY created_at DESC",
+                    tuple(self.TERMINAL_STATUSES),
                 )
+                return [dict(row) for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            Logger.error(f"Failed to read active tasks: {e}")
+            return []
+
+    def get_history(self, limit: int = 50, source: Optional[str] = None) -> list:
+        """
+        Bản ghi tải gần nhất. `source=None` trả mọi nguồn — cửa sổ app dùng thế
+        (D6); extension truyền 'extension' để chỉ lấy của nó.
+        """
+        try:
+            with self._get_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                if source:
+                    cursor = conn.execute(
+                        "SELECT * FROM download_history WHERE source = ?"
+                        " ORDER BY created_at DESC LIMIT ?",
+                        (source, limit),
+                    )
+                else:
+                    cursor = conn.execute(
+                        "SELECT * FROM download_history ORDER BY created_at DESC LIMIT ?",
+                        (limit,),
+                    )
                 return [dict(row) for row in cursor.fetchall()]
         except sqlite3.Error as e:
             Logger.error(f"Failed to read history: {e}")

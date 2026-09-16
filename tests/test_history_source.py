@@ -76,5 +76,56 @@ class TestMigrationOnExistingDb(unittest.TestCase):
         os.unlink(tmp.name)
 
 
+class TestActiveAndFilter(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        self.svc = HistoryService(db_path=self.tmp.name)
+
+    def tearDown(self):
+        os.unlink(self.tmp.name)
+
+    def test_active_excludes_terminal_statuses(self):
+        self.svc.create_task("running", "u1")
+        self.svc.create_task("done", "u2")
+        self.svc.update_task("running", status="downloading")
+        self.svc.update_task("done", status="completed")
+
+        ids = {t["task_id"] for t in self.svc.get_active_tasks()}
+        self.assertIn("running", ids)
+        self.assertNotIn("done", ids)
+
+    def test_active_includes_paused(self):
+        """Task tạm dừng chưa kết thúc — người dùng cần thấy để bấm tiếp tục."""
+        self.svc.create_task("held", "u")
+        self.svc.update_task("held", status="paused")
+        self.assertIn("held", {t["task_id"] for t in self.svc.get_active_tasks()})
+
+    def test_active_includes_pending(self):
+        self.svc.create_task("waiting", "u")
+        self.assertIn("waiting", {t["task_id"] for t in self.svc.get_active_tasks()})
+
+    def test_active_carries_source(self):
+        self.svc.create_task("x", "u", source="extension")
+        self.svc.update_task("x", status="downloading")
+        self.assertEqual(self.svc.get_active_tasks()[0]["source"], "extension")
+
+    def test_history_filters_by_source(self):
+        for src in ("extension", "desktop", "cli"):
+            self.svc.save_record(title=src, url="u", m3u8_url="m", format_id="best",
+                                 status="SUCCESS", output_path="/tmp/f", source=src)
+
+        only_ext = self.svc.get_history(source="extension")
+        self.assertEqual(len(only_ext), 1)
+        self.assertEqual(only_ext[0]["source"], "extension")
+
+    def test_history_without_filter_returns_all_sources(self):
+        """Cửa sổ app hiện mọi nguồn (D6)."""
+        for src in ("extension", "desktop", "cli"):
+            self.svc.save_record(title=src, url="u", m3u8_url="m", format_id="best",
+                                 status="SUCCESS", output_path="/tmp/f", source=src)
+        self.assertEqual(len(self.svc.get_history()), 3)
+
+
 if __name__ == "__main__":
     unittest.main()
