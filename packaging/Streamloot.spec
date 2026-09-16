@@ -43,6 +43,9 @@ hiddenimports = [
 # Plugins are imported by name at runtime, so static analysis never sees them.
 hiddenimports += collect_submodules("plugins")
 hiddenimports += collect_submodules("webview")
+# statusbar được import qua đường namespace package (apps.desktop.statusbar);
+# thêm tường minh để phân tích tĩnh của PyInstaller không bỏ sót.
+hiddenimports += ["apps.desktop.statusbar", "AppKit", "Foundation", "objc"]
 
 
 a = Analysis(
@@ -99,6 +102,11 @@ app = BUNDLE(
         "CFBundleShortVersionString": os.environ.get("STREAMLOOT_VERSION", "0.1.0"),
         "CFBundleVersion": os.environ.get("STREAMLOOT_VERSION", "0.1.0"),
         "NSHighResolutionCapable": True,
+        # B4: KHÔNG đặt LSUIElement ở đây. Đặt LSUIElement=True là app vĩnh viễn
+        # không có icon Dock, kể cả khi cửa sổ đang mở — sai với một app có cửa
+        # sổ chính. Thay vào đó apps/desktop/statusbar.py gọi
+        # setActivationPolicy_() lúc chạy: có icon Dock khi cửa sổ hiện, ẩn khi
+        # cửa sổ bị ẩn và app lui về menu bar.
         # main.py talks to its own backend on 127.0.0.1 over plain http, which
         # App Transport Security blocks by default inside a bundle.
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},

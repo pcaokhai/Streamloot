@@ -1,4 +1,5 @@
 import webview
+import AppKit
 import os
 import sys
 import secrets
@@ -32,6 +33,10 @@ os.environ.setdefault("CORS_ALLOWED_ORIGINS", f"http://127.0.0.1:{UI_PORT}")
 # We can reuse the FastAPI backend for the Desktop UI!
 from apps.api.main import app as fastapi_app
 from utils import paths
+# Dùng đường package (namespace package, PROJECT_ROOT đã ở sys.path phía trên)
+# cho nhất quán với apps.api và để PyInstaller phân giải được trong bundle.
+from apps.desktop import statusbar
+from utils.logger import Logger
 
 
 class JsApi:
@@ -57,6 +62,28 @@ def start_backend():
     uvicorn.run(fastapi_app, host="127.0.0.1", port=DESKTOP_PORT, log_level="error")
 
 
+# Đặt True chỉ khi người dùng thật sự chọn Thoát. Không có cờ này thì
+# NSApp.terminate_() sẽ đi qua applicationShouldTerminate_ -> should_close ->
+# handler bên dưới huỷ đóng, và app không bao giờ thoát được.
+_quitting = False
+
+
+def close_verdict(quitting: bool):
+    """
+    Quyết định khi cửa sổ sắp đóng. Tách riêng vì ngữ nghĩa của pywebview ngược
+    với trực giác và rất dễ viết sai — viết sai là đóng cửa sổ giết luôn backend,
+    đúng cái bug mà B2 sinh ra để sửa.
+
+    `Event.set()` trả True (= huỷ đóng) khi có handler trả về **False**.
+    Trả None hay True đều cho cửa sổ đóng thật.
+
+    Returns:
+        False  -> huỷ việc đóng, chỉ ẩn cửa sổ
+        None   -> cho đóng thật (người dùng đã chọn Thoát)
+    """
+    return None if quitting else False
+
+
 def main():
     server_thread = threading.Thread(target=start_backend, daemon=True)
     server_thread.start()
@@ -76,7 +103,7 @@ def main():
             "Run: cd apps/desktop/ui && npm install && npm run build"
         )
 
-    webview.create_window(
+    window = webview.create_window(
         "Downloads",
         html_path,  # no file:// prefix — pywebview serves this via its own
                     # local HTTP server (below), giving the page a real
@@ -94,8 +121,49 @@ def main():
     # DOWNLOADER_DEBUG=1 enables the WKWebView inspector (right-click ->
     # Inspect Element) — with debug=False there is zero visibility into JS
     # errors, so a blank/broken window gives no signal at all to diagnose.
+    def on_closing():
+        """
+        B2: đóng cửa sổ KHÔNG được giết backend — extension cần gọi được bất cứ
+        lúc nào. Ẩn cửa sổ, app sống tiếp ở menu bar.
+
+        Ngữ nghĩa ngược với trực giác: `Event.set()` của pywebview trả True (=huỷ
+        đóng) khi có handler trả về **False**. Trả None/True là cửa sổ đóng thật.
+        Event `closing` được dựng với should_lock=True nên giá trị trả về mới
+        được tôn trọng — nếu không nó chạy ở thread khác và bị bỏ qua.
+        """
+        verdict = close_verdict(_quitting)
+        if verdict is False:
+            window.hide()
+            statusbar.set_dock_icon(False)
+        return verdict
+
+    window.events.closing += on_closing
+
+    def show_window():
+        window.show()
+        statusbar.set_dock_icon(True)
+        statusbar.activate()
+
+    def quit_app():
+        global _quitting
+        _quitting = True
+        AppKit.NSApplication.sharedApplication().terminate_(None)
+
+    def on_loop_started():
+        """
+        Chạy sau khi NSApplication đã khởi động. Bắt buộc phải ở đây chứ không
+        phải lúc import: `platforms/cocoa.py` gọi setActivationPolicy_(0) ngay
+        khi module được import, nên mọi thay đổi trước đó sẽ bị ghi đè.
+        """
+        statusbar.install(on_show=show_window, on_quit=quit_app, port=DESKTOP_PORT)
+
     debug = os.getenv("DOWNLOADER_DEBUG") == "1"
-    webview.start(debug=debug, http_server=True, http_port=UI_PORT)
+    if debug:
+        # Trước đây cờ này chỉ bật inspector của WKWebView. Bật luôn log mức
+        # DEBUG cho app: khi menu bar hoặc backend hỏng, file log là nơi duy
+        # nhất còn dấu vết (app không có terminal khi chạy từ Finder).
+        Logger.init(debug=True)
+    webview.start(on_loop_started, debug=debug, http_server=True, http_port=UI_PORT)
 
 
 if __name__ == "__main__":
