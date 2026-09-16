@@ -561,7 +561,7 @@ async def stream_progress(
 
 
 @app.get("/api/v1/history", dependencies=[Depends(verify_api_key)])
-def get_history(source: Optional[str] = None):
+def get_history(source: Optional[Literal["cli", "desktop", "extension", "unknown"]] = None):
     # source=None trả mọi nguồn — cửa sổ app dùng thế (D6).
     return history.get_history(limit=50, source=source)
 

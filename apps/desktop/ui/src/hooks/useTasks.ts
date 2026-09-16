@@ -66,6 +66,9 @@ export function useTasks() {
           },
         };
       });
+      // Đang stream rồi thì thôi: attachStream sẽ no-op, nên xin token chỉ tổ
+      // cấp ra rồi vứt đi (token là dùng-một-lần).
+      if (streamsRef.current.has(t.task_id)) return;
       // Task này có thể do extension hoặc CLI khởi động, nên ta không có token.
       // Xin một cái mới — cơ chế đã có sẵn cho đường khôi phục sau khi mở lại app.
       try {

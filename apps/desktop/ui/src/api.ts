@@ -85,7 +85,9 @@ export interface StartDownloadResult {
 }
 
 export function startDownload(url: string, formatId: string | null): Promise<StartDownloadResult | null> {
-  const body: { url: string; format_id?: string } = { url };
+  // §6.2: mỗi surface tự khai nguồn, nếu không cột Source trống với mọi thứ
+  // người dùng bấm từ chính app.
+  const body: { url: string; source: string; format_id?: string } = { url, source: "desktop" };
   if (formatId) body.format_id = formatId;
   return request<StartDownloadResult>("/downloads", { method: "POST", body: JSON.stringify(body) });
 }

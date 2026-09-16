@@ -31,6 +31,7 @@ export interface TaskRecord {
   output_path: string | null;
   error_msg: string | null;
   avg_speed: string | null;
+  source: string;
   created_at: string;
   updated_at: string;
 }
