@@ -534,7 +534,7 @@ Nhưng làm được, không thêm dependency:
 | **1** | B2 + B3 + B4 | App chạy nền được, đóng cửa sổ không chết |
 | **2** | ✅ B1 + B5 + B9 + **B13** | **Xong 2026-09-16.** `curl` giả lập extension tải được cả 2 đường; SSE trả 401 khi thiếu token |
 | **3** | ✅ Nhóm A + B7 + B8 + B12 | **Xong 2026-09-16.** Extension đầy đủ: panel tự nổi, chọn chất lượng, tiến trình. Kèm `/formats/prepared` và SSE nhận Bearer |
-| **4** | B6 + B10 + B11 | Dùng được hàng ngày |
+| **4** | ✅ B6 + B10; ~~B11~~ | **Xong 2026-09-16.** B11 không còn cần — xem §7.5 |
 
 Mỗi giai đoạn kết thúc bằng một thứ chạy được. **Giai đoạn 0 làm trước, không bỏ qua.**
 
@@ -630,6 +630,35 @@ tâm gì".
 
 Phép thử thật nằm ở B1: gửi `VideoInfo` không cookie xuống `yt-dlp` và xem có tải
 được không. Rẻ, và lúc đó đã có sẵn hạ tầng.
+
+### 7.5. Xác thực extension: ba lần sai trước khi đúng
+
+Vấn đề: bắt người dùng dán API key là rườm rà, mà key thì app sinh ngẫu nhiên mỗi
+lần khởi động. Ba cách đã thử, hai cách đầu **sai vì tôi khẳng định mà chưa đo**.
+
+| Cách | Kết quả |
+|---|---|
+| **1. `Origin` khớp ID ghim** | **Sai.** Extension khai `host_permissions` cho host này, mà với host đã được cấp quyền thì Chrome cho gọi thẳng, không ràng buộc CORS, **và không gửi `Origin`**. Đo được: backend nhận `Origin: None` |
+| **2. Content script gọi thẳng backend** | **Sai.** Trong MV3, `fetch` từ content script bị gắn `Origin` của **trang** chứ không phải extension. Mọi lời gọi phải đi qua service worker |
+| **3. Custom header `X-Streamloot-Extension-Id`** | **Đúng.** Mang `browser.runtime.id`, khớp ID ghim cứng |
+
+**Vì sao (3) vẫn chặn được trang web độc hại:** trình duyệt không cho trang đặt
+header tuỳ ý trên request cross-origin nếu chưa qua preflight, mà preflight thì bị
+CORS allowlist chặn. Trang gửi request đơn giản không kèm header thì rơi vào 401.
+
+**Yếu hơn ở đâu, nói thẳng:** tiến trình local (`curl`) giả được header. Nhưng
+tiến trình local cũng đọc được `API_KEY` từ môi trường app, nên khoản đó vốn đã
+không bảo vệ nổi trường hợp này.
+
+**B11 (handshake Native Messaging) vì thế không còn cần.** Nó sinh ra để giải bài
+toán phân phối API key, mà bài toán đó đã biến mất. Giữ lại như phương án dự
+phòng *duy nhất* nếu sau này cần chặn cả tiến trình local — lúc đó Chrome bảo đảm
+danh tính, không dựa vào header nào.
+
+**Bài học quy trình, không phải kỹ thuật:** cả hai lần sai đều do khẳng định một
+cơ chế hoạt động mà chưa đo. Mỗi lần một lệnh `curl` mô phỏng đúng ngữ cảnh, hoặc
+chỉ cần ghi log ở nhánh 401, đã trả lời trong một lượt. Chính ADR này có mục
+"Claimed Limitations Need Evidence".
 
 ### 7.4. Hệ quả
 
