@@ -134,10 +134,12 @@ Mở 3 site, ghi lại kết quả:
 
 ## Open Questions
 
-1. **P3 chưa được phản ánh vào ADR 0005 §3.** Phần loại Phương án 3 vẫn thiếu
-   trục "ma sát demo". Nếu probe trượt, đây là thứ phải cân lại đầu tiên.
-2. **P4 chưa có hạng mục.** Lỗ hổng SSE cần một mục B13 và một vị trí trong
-   §6.7 — hiện chỉ được ghi nhận ở §6.2.4 rồi bỏ đó.
+1. ~~**P3 chưa được phản ánh vào ADR 0005 §3.**~~ **Đã xử lý:** thêm §3.1 "Trục bị
+   bỏ sót: ma sát demo" với bảng đếm số bước demo từng phương án, và nêu rõ điều
+   kiện xem lại quyết định nếu probe trượt.
+2. ~~**P4 chưa có hạng mục.**~~ **Đã xử lý:** thêm B13 + §6.3.1 (phân tích lỗ hổng,
+   hai cách sửa, đề xuất token dùng-một-lần) và xếp vào §6.7 giai đoạn 2. Kéo theo
+   §8 item 9: ADR 0004 cần cập nhật sau khi B13 xong.
 3. **Ký + notarize vẫn mở** (§8 item 4). Xem "What I noticed" bên dưới.
 4. ADR 0005 và 0006 giữ status **Proposed** cho tới khi probe có kết quả.
 

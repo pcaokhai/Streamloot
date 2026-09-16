@@ -241,6 +241,8 @@ Extension làm hết, không cần app native.
     `chrome.offscreen`, và khai báo `"content_security_policy": {"extension_pages":
     "script-src 'self' 'wasm-unsafe-eval'"}` (Chrome 103+ không cấp mặc định nữa).
   - Mất R6 hoàn toàn: không có pause/resume mức process, không SQLite bền vững.
+- **Ưu điểm bị bỏ sót lúc đầu — ma sát demo:** đây là phương án duy nhất mà người
+  xem chỉ phải làm **một** việc: *"cài extension này"*. Xem §3.1.
 
 ### Phương án 4 — Port yt-dlp sang WASM
 
@@ -249,6 +251,32 @@ Extension làm hết, không cần app native.
   yt-dlp) và không có `subprocess` (yt-dlp gọi ffmpeg qua subprocess).
 - Quan trọng hơn: **port đúng phần không cần.** Giá trị của yt-dlp là (a) extract
   cho 1000+ site và (b) mux. Trong extension, (a) đã có sẵn và làm tốt hơn.
+
+### 3.1. Trục bị bỏ sót: ma sát demo
+
+Bốn phương án trên ban đầu chỉ được so bằng tiêu chí kỹ thuật (bộ nhớ, vòng đời,
+R6). Với mục tiêu portfolio thì thiếu một trục có chi phí thật: **người xem phải
+làm bao nhiêu bước trước khi thấy nó chạy.**
+
+| Phương án | Số bước để demo | Chi tiết |
+|---|---|---|
+| 1 (status quo) | 3 | Cài Python + uv → `uv sync` → chạy CLI. Không demo được cho người không phải dev |
+| **2 (đề xuất)** | **4** | Tải `.app` 146MB → mở (Gatekeeper chặn nếu chưa ký) → cài extension → hai bên bắt tay qua localhost |
+| 3 (ffmpeg.wasm) | **1** | Cài extension. Hết |
+| 4 (yt-dlp WASM) | — | Không khả thi |
+
+Phương án 2 còn có một điểm gãy mà các phương án khác không có: **nếu app local
+chưa chạy thì extension chết câm.** Đúng thứ sẽ xảy ra khi người xem thử lần đầu.
+B6 (báo trạng thái offline) giảm nhẹ, không xóa được.
+
+**Điều này không đảo ngược quyết định.** Các lý do kỹ thuật loại Phương án 3 vẫn
+đứng: trần bộ nhớ 2GB giết video dài, và mất R6 nghĩa là mất pause/resume cùng
+history — hai thứ đã chạy được rồi. Đánh đổi 3 bước demo để giữ những thứ đó là
+lựa chọn có ý thức.
+
+Nhưng nó đổi **điều kiện để xem lại quyết định**: nếu probe ở §6.7 GĐ 0 trượt, đọc
+lại bảng này trước khi sửa Phương án 2 — vì lúc đó Phương án 3 vừa rẻ hơn về demo
+vừa không còn bị Phương án 2 vượt về năng lực.
 
 ### Ghi chú: có thể không cần ffmpeg cho luồng chính
 
@@ -418,6 +446,32 @@ Vì codebase đã có sẵn HTTP + SSE + ADR 0004, giữ transport hiện tại 
 | **B10** | Expose `concurrency` ra options page | §2.1 bước 4 | `-N` đã chạy sẵn (§6.2.3). IDM nổi tiếng vì multi-connection. Gần như miễn phí. |
 | **B11** | Handshake qua Native Messaging *(tùy chọn)* | §2.5b | Extension hỏi một phát `{port, api_key}` rồi quay lại HTTP. Giải 2 điểm treo của ADR 0004 (phân phối API key, ghim extension ID) mà không đụng transport. |
 | **B12** | Sniff theo cả `Content-Type` | §2.5c | Ngoài chuỗi `m3u8`/`mpd` trong URL, bắt thêm `application/vnd.apple.mpegurl`, `application/x-mpegURL`, `application/dash+xml`. URL manifest thường có query string hoặc không đuôi. |
+| **B13** | **Siết xác thực cho luồng SSE** | §6.2.4 | Xem §6.3.1 bên dưới. Bắt buộc trước khi extension gọi endpoint này, vì extension mở rộng bề mặt tấn công so với desktop app tự gọi chính mình. |
+
+#### 6.3.1. B13 — Lỗ hổng SSE, chi tiết
+
+`apps/api/main.py:274` là endpoint duy nhất thiếu `Depends(verify_api_key)`.
+
+**Vì sao nó tồn tại:** `EventSource` của trình duyệt không set được header
+`Authorization`. ADR 0004 biết và cố ý ghi ngoại lệ ("trừ SSE stream").
+
+**Vì sao hiện chấp nhận được:** `task_id` là UUID4 — không đoán được, và chỉ client
+vừa tạo task mới biết nó.
+
+**Vì sao extension làm nó tệ hơn:** desktop app hiện tại tự gọi backend của chính
+nó trên một origin nó tự kiểm soát. Extension chạy trên mọi trang người dùng mở,
+nên bất kỳ trang nào cũng có thể thử `EventSource` tới `127.0.0.1:8001`. Vẫn cần
+đoán trúng UUID4, nhưng bề mặt tấn công rộng hơn hẳn.
+
+**Hai cách sửa:**
+
+| Cách | Chi tiết | Đánh giá |
+|---|---|---|
+| **Token dùng-một-lần trong query** | `POST /downloads` trả thêm `stream_token`; endpoint stream nhận `?token=`, dùng xong hủy | Nhỏ, giữ nguyên `EventSource` phía client |
+| `fetch()` + `ReadableStream` | Thay `EventSource`, `fetch` set được header `Authorization` bình thường | Sạch hơn về mặt mô hình, nhưng phải viết lại phần đọc stream ở cả desktop UI lẫn extension |
+
+Đề xuất: **token dùng-một-lần** — nhỏ hơn, không đụng UI desktop đang chạy tốt.
+Cần cập nhật ADR 0004 để ghi nhận ngoại lệ "trừ SSE stream" đã được đóng lại.
 
 #### Nhóm C — Không đụng
 
@@ -478,7 +532,7 @@ Nhưng làm được, không thêm dependency:
 |---|---|---|
 | **0** | Extension probe ~50 dòng, chỉ `console.log` request khớp manifest, mở 3 site | **Cổng chặn.** Một buổi tối. Không bắt được thì dừng, khỏi tốn gì thêm |
 | **1** | B2 + B3 + B4 | App chạy nền được, đóng cửa sổ không chết |
-| **2** | B1 + B5 + B9 | `curl` giả lập extension tải được, cả 2 đường |
+| **2** | B1 + B5 + B9 + **B13** | `curl` giả lập extension tải được, cả 2 đường, và luồng SSE đã xác thực |
 | **3** | Nhóm A + B7 + B8 + B12 | One-click capture chạy thật |
 | **4** | B6 + B10 + B11 | Dùng được hàng ngày |
 
@@ -551,3 +605,5 @@ Mỗi giai đoạn kết thúc bằng một thứ chạy được. **Giai đoạ
    phần còn lại của dự án chỉ là site có nội dung ngụy trang. Đáng làm hay không là
    quyết định của bạn, nhưng nên trả lời thẳng trước khi đầu tư tiếp.
 8. **Tech stack cho extension** — xem [ADR 0006](0006-extension-tech-stack.md).
+9. **ADR 0004 cần cập nhật** sau khi B13 xong: ngoại lệ "trừ SSE stream" trong
+   phần Decision không còn đúng nữa.
