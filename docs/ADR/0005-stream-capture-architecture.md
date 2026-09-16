@@ -553,6 +553,9 @@ Mỗi giai đoạn kết thúc bằng một thứ chạy được. **Giai đoạ
 
 Probe (`apps/extension/`) đã chạy trên cả 3 site. **Kết quả: 3/3.**
 
+> Nhật ký từng lần chạy — gồm ba lần đoán sai và vì sao — ở
+> [`docs/impl/2026-09-16-stage0-probe-log.md`](../impl/2026-09-16-stage0-probe-log.md).
+
 | Plugin | Manifest bắt được? | Qua | Ngữ cảnh phiên bắt được |
 |---|---|---|---|
 | **A** (auto-click Turnstile) | ✅ | `url` | `referer, origin, ua` |
