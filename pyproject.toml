@@ -1,0 +1,22 @@
+[project]
+name = "streamloot"
+version = "0.1.0"
+description = "A modular, multi-mode video downloader with a plugin-based extractor system"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.141,<1.0",
+    "uvicorn>=0.52,<1.0",
+    "sse-starlette>=3.4,<4.0",
+    "pydantic>=2.13,<3.0",
+    "rich>=15.0,<16.0",
+    "pywebview>=6.2,<7.0",
+    "DrissionPage>=4.1,<5.0",
+]
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.22,<7.0"]
+
+[tool.uv]
+package = false
