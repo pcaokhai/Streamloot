@@ -56,6 +56,7 @@ export interface HistoryRow {
   output_path: string | null;
   playlist_name: string | null;
   created_at: string;
+  source?: string;
 }
 
 export interface FormatInfo {

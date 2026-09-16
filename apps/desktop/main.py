@@ -143,6 +143,9 @@ def main():
         window.show()
         statusbar.set_dock_icon(True)
         statusbar.activate()
+        # B2 cho phép ẩn cửa sổ mà app vẫn chạy, nên ẩn xong mở lại có thể đã
+        # khác rất nhiều — bảo trang dựng lại danh sách.
+        window.evaluate_js("window.dispatchEvent(new Event('streamloot:refresh'))")
 
     def quit_app():
         global _quitting

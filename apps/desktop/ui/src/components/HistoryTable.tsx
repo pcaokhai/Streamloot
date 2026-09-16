@@ -7,7 +7,7 @@ interface Props {
   onContextMenu: (x: number, y: number, ctx: RowContext) => void;
 }
 
-const COLUMNS = "280px 260px 110px 150px"; // Name, URL, Status, Completed
+const COLUMNS = "280px 260px 110px 150px 100px"; // Name, URL, Status, Completed, Source
 
 export function HistoryTable({ rows, onContextMenu }: Props) {
   const { gridRef, onHandleMouseDown } = useColumnResize();
@@ -20,6 +20,7 @@ export function HistoryTable({ rows, onContextMenu }: Props) {
           <div className="grid-cell">URL<span className="col-resize-handle" onMouseDown={onHandleMouseDown(1)} /></div>
           <div className="grid-cell">Status<span className="col-resize-handle" onMouseDown={onHandleMouseDown(2)} /></div>
           <div className="grid-cell">Completed</div>
+          <div className="grid-cell">Source</div>
         </div>
 
         {rows.map((r) => {
@@ -47,6 +48,7 @@ export function HistoryTable({ rows, onContextMenu }: Props) {
                 </span>
               </div>
               <div className="grid-cell col-completed">{r.created_at}</div>
+              <div className="grid-cell">{r.source && r.source !== "unknown" ? r.source : "—"}</div>
             </div>
           );
         })}

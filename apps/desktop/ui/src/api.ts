@@ -114,6 +114,15 @@ export function resumeTask(taskId: string): Promise<unknown> {
   return request(`/downloads/${taskId}/resume`, { method: "POST" });
 }
 
+/**
+ * Mọi task chưa kết thúc, bất kể nguồn nào khởi động — cửa sổ app, extension
+ * hay CLI. Thay hoàn toàn cho việc tự nhớ danh sách task id trong localStorage:
+ * backend đã biết, client chỉ phản chiếu.
+ */
+export function getActiveTasks(): Promise<{ tasks: TaskRecord[] } | null> {
+  return request<{ tasks: TaskRecord[] }>("/downloads/active");
+}
+
 export function getHistory(): Promise<HistoryRow[] | null> {
   return request<HistoryRow[]>("/history");
 }

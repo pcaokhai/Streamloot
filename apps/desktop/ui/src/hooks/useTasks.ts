@@ -2,28 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import { TERMINAL_STATUSES, type ProgressEvent, type Task } from "../types";
 
-const STORAGE_KEY = "downloader.activeTaskIds";
-
-function loadStoredTaskIds(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]") as string[];
-  } catch {
-    return [];
-  }
-}
-
-function saveStoredTaskIds(ids: string[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
-}
-
 export function useTasks() {
   const [tasks, setTasks] = useState<Record<string, Task>>({});
   const streamsRef = useRef<Map<string, EventSource>>(new Map());
-  // Guards the persist-effect below from firing on the very first mount
-  // render (tasks = {}) before the rehydration effect has read the
-  // stored id list — without this, the persist-effect wins the race and
-  // overwrites the stored list with [] before rehydration ever sees it.
-  const hydratedRef = useRef(false);
 
   const patchTask = useCallback((taskId: string, patch: Partial<Task>) => {
     setTasks((prev) => {
@@ -59,52 +40,38 @@ export function useTasks() {
     streamsRef.current.set(taskId, es);
   }, [patchTask]);
 
-  // Persist the active task-id list whenever the set of known tasks changes
-  // (not on every field update) so a relaunch can rehydrate live progress.
-  // Skipped until the rehydration effect below has run once — see hydratedRef.
-  useEffect(() => {
-    if (!hydratedRef.current) return;
-    saveStoredTaskIds(Object.keys(tasks));
-  }, [tasks]);
+  const hydrate = useCallback(async () => {
+    const res = await api.getActiveTasks();
+    if (!res) return;
+    for (const t of res.tasks) {
+      setTasks((prev) => ({
+        ...prev,
+        [t.task_id]: {
+          url: t.url,
+          title: t.title,
+          status: t.status,
+          completed: t.progress,
+          speed: t.avg_speed ?? "--",
+          formatId: null,
+          outputPath: t.output_path,
+        },
+      }));
+      // Task này có thể do extension hoặc CLI khởi động, nên ta không có token.
+      // Xin một cái mới — cơ chế đã có sẵn cho đường khôi phục sau khi mở lại app.
+      const tok = await api.refreshStreamToken(t.task_id);
+      if (tok?.stream_token) attachStream(t.task_id, tok.stream_token);
+    }
+  }, [attachStream]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const storedIds = loadStoredTaskIds();
-      for (const taskId of storedIds) {
-        try {
-          const t = await api.getTask(taskId);
-          if (!t || cancelled) continue;
-          setTasks((prev) => ({
-            ...prev,
-            [taskId]: {
-              url: t.url,
-              title: t.title,
-              status: t.status,
-              completed: t.progress,
-              speed: t.avg_speed ?? "--",
-              formatId: null,
-              outputPath: t.output_path,
-            },
-          }));
-          if (!TERMINAL_STATUSES.has(t.status)) {
-            // Token cũ đã bị tiêu thụ ở phiên trước — phải xin cái mới.
-            void api.refreshStreamToken(taskId).then((r) => {
-              if (r?.stream_token) attachStream(taskId, r.stream_token);
-            });
-          }
-        } catch {
-          // Task no longer exists server-side (e.g. db reset) — drop it silently.
-        }
-      }
-      if (!cancelled) hydratedRef.current = true;
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // Runs once on mount — attachStream/patchTask are stable via useCallback.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void hydrate();
+  }, [hydrate]);
+
+  useEffect(() => {
+    const onRefresh = () => void hydrate();
+    window.addEventListener("streamloot:refresh", onRefresh);
+    return () => window.removeEventListener("streamloot:refresh", onRefresh);
+  }, [hydrate]);
 
   const beginDownload = useCallback(async (url: string, formatId: string | null, title: string | null) => {
     const result = await api.startDownload(url, formatId);
