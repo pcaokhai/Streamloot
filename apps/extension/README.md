@@ -53,10 +53,19 @@ manifest — và vì sao YouTube đi đường B9 fallback trong thiết kế, k
 
 | Cột | Nghĩa |
 |---|---|
-| **Host** | Tên miền của manifest (thường là CDN, khác tên miền trang) |
+| **Trang** | Tên miền trang đã khởi tạo request (từ `initiator`). Nhóm theo cột này, vì câu hỏi "mấy trong 3 site" hỏi về trang |
+| **Manifest ở** | Nơi manifest thực sự nằm — **thường là CDN riêng**, khác hẳn tên miền trang |
 | **Hits** | Số manifest khác nhau bắt được |
 | **Qua** | `url` = khớp đuôi `.m3u8`/`.mpd`; `content-type` = khớp header. Thấy `content-type` xuất hiện tức là **B12 có giá trị thật** |
-| **Ngữ cảnh phiên** | Bắt được `cookie`/`referer`/`ua` chưa — đây là bước 3 của mô hình IDM (ADR 0005 §2.1). Thiếu cookie thì URL stream nhiều khả năng trả 403 khi tải ngoài trình duyệt |
+| **Ngữ cảnh phiên** | Bắt được `cookie`/`referer`/`origin`/`ua` chưa — đây là bước 3 của mô hình IDM (ADR 0005 §2.1). Thiếu cookie thì URL stream nhiều khả năng trả 403 khi tải ngoài trình duyệt |
+
+### Thiếu cookie chưa chắc là vấn đề
+
+Nếu cột ngữ cảnh ra `referer, origin, ua` mà không có `cookie`, hãy đối chiếu với
+plugin tương ứng trong `plugins/` trước khi kết luận. Có plugin đang chạy tốt mà
+**không** truyền cookie — site đó dùng signed URL chứ không ràng phiên qua cookie.
+Chỉ khi plugin có harvest cookie (`page.cookies()`) mà probe không bắt được thì
+mới là khoảng cách thật.
 
 ## Ghi kết quả vào ADR
 

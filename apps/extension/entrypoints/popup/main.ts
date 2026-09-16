@@ -26,23 +26,26 @@ async function render() {
     return;
   }
 
-  // Con số duy nhất mà probe này tồn tại để trả lời: bắt được mấy site.
-  const byHost = new Map<string, Hit[]>();
-  for (const h of hits) byHost.set(h.host, [...(byHost.get(h.host) ?? []), h]);
-  score.textContent = `${byHost.size} site bắt được`;
+  // Nhóm theo TRANG, không theo CDN: câu hỏi "mấy trong 3 site" hỏi về trang.
+  const byPage = new Map<string, Hit[]>();
+  for (const h of hits) byPage.set(h.page, [...(byPage.get(h.page) ?? []), h]);
+  score.textContent = `${byPage.size} site bắt được`;
 
   out.innerHTML =
     `<div class="sub">đã quan sát ~${seenTotal}+ request</div>` +
-    '<table><tr><th>Host</th><th>Hits</th><th>Qua</th><th>Ngữ cảnh phiên</th></tr>' +
-    [...byHost].map(([host, hs]) => {
+    '<table><tr><th>Trang</th><th>Manifest ở</th><th>Hits</th><th>Qua</th><th>Ngữ cảnh phiên</th></tr>' +
+    [...byPage].map(([page, hs]) => {
+      const cdns = [...new Set(hs.map((h) => h.host))].join(', ');
       const via = [...new Set(hs.map((h) => h.via))].join(' + ');
+      // Lấy hit giàu ngữ cảnh nhất — một số request thiếu header mà request khác có.
       const best = hs.find((h) => h.ctx.cookie) ?? hs[0];
       const ctx = [
         best.ctx.cookie ? 'cookie' : null,
         best.ctx.referer ? 'referer' : null,
+        best.ctx.origin ? 'origin' : null,
         best.ctx.userAgent ? 'ua' : null,
       ].filter(Boolean).join(', ') || '—';
-      return `<tr><td class="host" title="${esc(host)}">${esc(host)}</td><td>${hs.length}</td><td>${esc(via)}</td><td>${esc(ctx)}</td></tr>`;
+      return `<tr><td class="host" title="${esc(page)}">${esc(page)}</td><td class="host" title="${esc(cdns)}">${esc(cdns)}</td><td>${hs.length}</td><td>${esc(via)}</td><td>${esc(ctx)}</td></tr>`;
     }).join('') +
     '</table>';
 }

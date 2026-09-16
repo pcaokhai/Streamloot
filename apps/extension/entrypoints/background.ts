@@ -16,6 +16,9 @@ const detect = (url: string, contentType?: string) =>
   MANIFEST_URL.test(url) ? 'url' : contentType && MANIFEST_TYPE.test(contentType) ? 'content-type' : null;
 
 export interface Hit {
+  /** Trang đã khởi tạo request — câu hỏi "mấy trong 3 site" hỏi về cái này. */
+  page: string;
+  /** Host của chính manifest; thường là CDN riêng, khác tên miền trang. */
   host: string;
   url: string;
   via: 'url' | 'content-type';
@@ -23,6 +26,17 @@ export interface Hit {
   /** Ngữ cảnh phiên mà bước 3 của IDM cần bàn giao cho downloader (ADR 0005 §2.1). */
   ctx: { cookie: boolean; referer: boolean; userAgent: boolean; origin: boolean };
 }
+
+// d.initiator là origin của trang khởi tạo request. Thiếu nó thì popup chỉ hiện
+// hostname CDN, và người đo phải tự nhớ CDN nào thuộc site nào.
+const pageOf = (d: { initiator?: string; documentUrl?: string }) => {
+  const raw = d.initiator ?? d.documentUrl;
+  try {
+    return raw ? new URL(raw).hostname : '(không rõ)';
+  } catch {
+    return '(không rõ)';
+  }
+};
 
 // Một số 0 phải đọc được: nếu không đếm tổng request thì "0 manifest" vừa có thể
 // nghĩa là listener chưa chạy, vừa có thể nghĩa là site không có manifest nào.
@@ -55,6 +69,7 @@ export default defineBackground(() => {
       if (!via) return;
       const has = (n: string) => !!d.requestHeaders?.some((h) => h.name.toLowerCase() === n);
       void record({
+        page: pageOf(d),
         host: new URL(d.url).hostname,
         url: d.url,
         via,
@@ -75,6 +90,7 @@ export default defineBackground(() => {
       const via = detect(d.url, ct);
       if (via !== 'content-type') return undefined; // đường URL đã do listener trên lo
       void record({
+        page: pageOf(d),
         host: new URL(d.url).hostname,
         url: d.url,
         via,
