@@ -9,12 +9,24 @@ async function baseUrl(): Promise<string> {
 }
 
 /**
- * Không gửi API key. Backend nhận diện extension qua header `Origin`, mà Chrome
- * tự đặt là `chrome-extension://<id>` và JS không ghi đè được — xem verify_client
- * ở apps/api/main.py.
+ * Không gửi API key. Backend nhận diện extension qua `X-Streamloot-Extension-Id`.
+ *
+ * Vì sao là custom header chứ không phải `Origin`: extension khai
+ * `host_permissions` cho host này, mà với host đã được cấp quyền thì Chrome cho
+ * gọi thẳng, không ràng buộc CORS, và **không gửi `Origin`**. Đã đo thật: backend
+ * nhận `Origin: None`.
+ *
+ * Header này vẫn chặn được trang web độc hại: trình duyệt không cho trang đặt
+ * header tuỳ ý trên request cross-origin nếu chưa qua preflight, mà preflight
+ * thì bị CORS allowlist chặn.
  */
 function jsonHeaders(): Record<string, string> {
-  return { 'Content-Type': 'application/json' };
+  return {
+    'Content-Type': 'application/json',
+    // browser.runtime.id là ID thật của bản đang chạy — nếu nó lệch ID mà app
+    // tin thì lỗi hiện ra rõ ràng thay vì âm thầm.
+    'X-Streamloot-Extension-Id': browser.runtime.id,
+  };
 }
 
 export class BackendError extends Error {

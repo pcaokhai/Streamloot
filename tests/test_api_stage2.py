@@ -151,15 +151,34 @@ class TestStreamToken(unittest.TestCase):
 
 class TestOriginAuth(unittest.TestCase):
     """
-    Xác thực qua `Origin` cho extension — bỏ được bước dán API key.
+    Xác thực extension không cần API key.
 
-    An toàn với đúng mô hình đe dọa của ADR 0004 (trang web độc hại gọi ngầm tới
-    localhost): trình duyệt LUÔN tự đặt Origin và JS của trang không ghi đè được.
+    Dùng custom header chứ KHÔNG dùng Origin: extension khai host_permissions cho
+    host này, mà với host đã được cấp quyền thì Chrome cho gọi thẳng, không ràng
+    buộc CORS, và không gửi Origin. Đã đo thật — backend nhận Origin: None.
     """
 
     OFFICIAL = f"chrome-extension://{api_main.OFFICIAL_EXTENSION_ID}"
+    OFFICIAL_ID = api_main.OFFICIAL_EXTENSION_ID
+
+    def test_extension_id_header_is_accepted(self):
+        """Đây là đường THẬT mà extension đi."""
+        self.assertEqual(
+            api_main.verify_client(
+                credentials=None, origin=None, x_streamloot_extension_id=self.OFFICIAL_ID
+            ),
+            "extension",
+        )
+
+    def test_wrong_extension_id_header_is_rejected(self):
+        with self.assertRaises(HTTPException) as ctx:
+            api_main.verify_client(
+                credentials=None, origin=None, x_streamloot_extension_id="nottherightid"
+            )
+        self.assertEqual(ctx.exception.status_code, 401)
 
     def test_official_extension_origin_is_accepted(self):
+        """Đường dự phòng, giữ phòng khi Chrome đổi hành vi."""
         self.assertEqual(api_main.verify_client(credentials=None, origin=self.OFFICIAL), "extension")
 
     def test_valid_api_key_still_accepted(self):
@@ -191,6 +210,13 @@ class TestOriginAuth(unittest.TestCase):
         with self.assertRaises(HTTPException) as ctx:
             api_main.verify_client(credentials=creds, origin=None)
         self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_stream_accepts_extension_id_header(self):
+        res = run(api_main.stream_progress(
+            "task-hdr", token=None, authorization=None, origin=None,
+            x_streamloot_extension_id=self.OFFICIAL_ID,
+        ))
+        self.assertIsNotNone(res)
 
     def test_stream_accepts_official_origin(self):
         res = run(api_main.stream_progress(

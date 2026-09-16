@@ -45,10 +45,19 @@ hẳn tên miền trang, và 2/3 site đích phục vụ stream qua iframe riên
 **Không xin quyền `cookies`.** Phép đo B14 cho thấy mọi host phục vụ byte media
 đều không nhận cookie, nên quyền đó là thừa.
 
-**Không dùng API key.** Backend nhận diện extension qua header `Origin` khớp một
-ID đã ghim cứng. Trình duyệt **luôn tự đặt** `Origin` và JS của trang **không ghi
-đè được**, nên trang web độc hại không mạo danh được — đúng mô hình đe dọa mà
-ADR 0004 nêu. ID cố định nhờ pin `key` trong manifest.
+**Không dùng API key.** Backend nhận diện extension qua header
+`X-Streamloot-Extension-Id` mang `browser.runtime.id`, khớp một ID ghim cứng
+(ID cố định nhờ pin `key` trong manifest).
+
+*Lúc đầu tôi dùng `Origin` và nó không chạy:* extension khai `host_permissions`
+cho host này, mà với host đã được cấp quyền thì Chrome cho gọi thẳng, **không
+ràng buộc CORS, và không gửi `Origin`**. Backend nhận `Origin: None`. Custom
+header là đường duy nhất hoạt động.
+
+Custom header vẫn chặn được trang web độc hại: trình duyệt **không cho trang đặt
+header tuỳ ý** trên request cross-origin nếu chưa qua preflight, mà preflight thì
+bị CORS allowlist chặn. Trang gửi request đơn giản không kèm header thì rơi thẳng
+vào 401.
 
 Nói thẳng chỗ yếu hơn: một tiến trình local (`curl`) giả được `Origin`. Nhưng
 tiến trình local cũng đọc được API key từ môi trường của app, nên khoản đó vốn đã
