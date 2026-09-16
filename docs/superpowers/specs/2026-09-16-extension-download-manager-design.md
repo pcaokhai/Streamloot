@@ -24,6 +24,7 @@ Extension hiện bắt được stream và tải được, nhưng dừng ở đ�
 | Không tải được riêng âm thanh | `yt-dlp` làm được, UI chưa phơi ra |
 | Menu bar không biết gì về download | Đóng trình duyệt là mù hẳn về tiến trình |
 | Cửa sổ app chỉ thấy download của chính nó | Tải từ extension hay CLI thì cửa sổ app không hay biết |
+| Extension chưa có icon | Chrome hiện mảnh ghép mặc định, và không có cách nào liếc biết đang tải hay không |
 
 Thêm hai khoản nợ kỹ thuật cần cắt trong cùng đợt (§8).
 
@@ -64,6 +65,7 @@ header `X-Streamloot-Extension-Id`. Đã ghi ở ADR 0005 §7.5.
 | D4 | **Polling, không streaming** | §2.1. B (keep-alive) không sửa được giới hạn 5 phút; C (offscreen) không có `reason` hợp lệ cho việc giữ kết nối mạng |
 | D5 | **Menu bar hiện MỘT video đang tải + pause/resume/stop, xong thì ẩn** | Bề mặt duy nhất còn lại khi đóng trình duyệt. Một dòng là đủ để liếc; danh sách đầy đủ ở popup |
 | D6 | **Cửa sổ app thấy mọi download và mọi lịch sử, bất kể nguồn** | Nó là bề mặt đầy đủ nhất; thấy thiếu là sai. Kéo theo xoá `localStorage` ở `useTasks.ts` |
+| D7 | **Icon extension đổi theo trạng thái, TĨNH chứ không hoạt hình** | Hoạt hình cần bộ đếm lặp — chính là cách giữ service worker sống, đúng antipattern đã loại ở D4 |
 
 ## 4. Kiến trúc
 
@@ -232,15 +234,59 @@ Bấm icon extension. Đây là nơi **quản lý**, tách hẳn khỏi trang we
 Popup **có** nút pause/resume/cancel — khác với ghi chú ở bản trước. Nó là bề mặt
 quản lý chính của extension, nên phải điều khiển được.
 
-### 5.3. Badge trên icon
+### 5.3. Icon extension và badge
 
-| Trạng thái | Badge |
-|---|---|
-| Có download đang chạy | Số task đang chạy, nền xanh dương |
-| Không tải, có stream bắt được | Số stream, nền xám |
-| Không có gì | Trống |
+Extension **hiện chưa có icon nào** — Chrome đang hiện mảnh ghép mặc định. Nên
+phần này gồm hai việc: tạo bộ icon, rồi thêm biến thể theo trạng thái.
+
+#### Ba trạng thái icon
+
+| Trạng thái | Icon | Khi nào |
+|---|---|---|
+| **Rảnh** | Mũi tên tải, nét mảnh, đơn sắc | Không có download nào chạy |
+| **Đang tải** | Cùng hình, **tô đặc, màu nhấn** | Có ít nhất một task đang chạy |
+| **Tạm dừng** | Cùng hình, tô đặc, **màu xám** | Mọi task đang chạy đều ở trạng thái tạm dừng |
+
+Không hiện phần trăm trên icon. Con số nằm ở popup và menu bar.
+
+#### Vì sao icon TĨNH, không hoạt hình
+
+Icon hoạt hình (mũi tên chạy, vòng xoay) đẹp hơn, nhưng cần một bộ đếm lặp lại để
+vẽ từng khung. Mà **gọi API extension theo chu kỳ chính là cách giữ service worker
+sống** — đúng antipattern đã loại ở **D4** vì tài liệu Chrome nói nó chỉ dành cho
+trường hợp ngoại lệ.
+
+Ba icon tĩnh chỉ đặt lại **khi trạng thái đổi**: bắt đầu tải, tạm dừng, xong hết.
+Không bộ đếm, không giữ service worker sống, không tốn gì giữa các lần đổi.
+
+Kỹ thuật: service worker MV3 không có DOM, nhưng **có `OffscreenCanvas`** — đủ để
+`chrome.action.setIcon({imageData})` nếu muốn sinh icon lúc chạy. Với ba trạng thái
+tĩnh thì **không cần**: ship thẳng ba tệp PNG trong `public/`, đơn giản hơn và
+không phải vẽ gì lúc chạy.
+
+#### Badge
+
+Badge bổ sung cho icon chứ không lặp lại nó:
+
+| Trạng thái | Badge | Màu nền |
+|---|---|---|
+| Có download đang chạy | Số task đang chạy | Xanh dương |
+| Không tải, có stream bắt được trên tab này | Số stream | Xám |
+| Không có gì | Trống | — |
 
 Đang tải được ưu tiên hơn số stream bắt được — nó là thông tin cấp bách hơn.
+Badge **theo tab** cho số stream (đó là thứ gắn với trang), nhưng **toàn cục** cho
+số download (D2) — khi đang tải, mọi tab đều hiện cùng một con số.
+
+#### Asset cần tạo
+
+| Tệp | Kích thước | Ghi chú |
+|---|---|---|
+| `icon-16/32/48/128.png` | 4 cỡ | Trạng thái rảnh, cũng là `icons` trong manifest |
+| `icon-active-16/32/48/128.png` | 4 cỡ | Đang tải |
+| `icon-paused-16/32/48/128.png` | 4 cỡ | Tạm dừng |
+
+Đặt trong `apps/extension/public/`, WXT tự chép sang bản build.
 
 ### 5.4. Menu trên menu bar (app macOS)
 
@@ -409,6 +455,7 @@ và activation policy.
 | Extension | Máy trạng thái poll: bắt đầu khi có task, dừng khi hết, đổi nhịp theo việc có ai đang xem |
 | Extension | Hồi phục: xoá sạch cache rồi gọi `/downloads/active` phải dựng lại đủ danh sách, gồm cả task đang tạm dừng |
 | Extension | `all_frames`: khung không có `<video>` phải thoát ngay, không dựng gì |
+| Extension | Icon đổi đúng ba trạng thái và **chỉ đổi khi trạng thái đổi** — không có lời gọi `setIcon` lặp lại theo chu kỳ |
 | Thủ công | Tải một video **dài hơn 5 phút**, đóng panel, đổi trang, mở lại — tiến trình phải còn đúng. Đây là ca mà thiết kế cũ hỏng |
 | Thủ công | Pause giữa chừng, đợi, resume — file cuối cùng phải nguyên vẹn |
 | Thủ công | **Đóng hẳn trình duyệt** trong lúc tải, mở menu bar — phải thấy đúng tiến trình và bấm tạm dừng được |
