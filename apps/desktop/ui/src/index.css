@@ -1,0 +1,396 @@
+@import "./design-tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Component styles kept as plain CSS rather than rewritten into Tailwind
+   utility soup — this file is already token-driven and battle-tested
+   (survived several rounds of real WKWebView bugs); Tailwind's value here
+   is for new component layout in JSX, not for re-deriving colors/spacing
+   that already have a single source of truth in design-tokens.css.
+
+   Note: the old vanilla build needed a `[hidden] { display: none !important }`
+   blanket guard because a `hidden` attribute silently loses to any CSS rule
+   that sets `display` on the same element. React sidesteps that whole bug
+   class — conditionally rendered elements (`{cond && <div>...}`) simply
+   aren't in the DOM at all, so there's no `hidden` attribute to fight with. */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  font-size: 13px;
+  color: var(--label);
+  background: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.window {
+  display: flex;
+  height: 100vh;
+  background: var(--bg-window);
+}
+
+/* --- Sidebar --- */
+.sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--bg-sidebar);
+  padding: 44px 8px 8px; /* top padding clears the native traffic lights */
+}
+
+.sidebar-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--label-tertiary);
+  text-transform: uppercase;
+  padding: 4px 8px;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--label);
+  cursor: default;
+  text-align: left;
+}
+
+.sidebar-item:hover { background: var(--bg-row-hover); }
+.sidebar-item.active { background: var(--accent); color: #FFFFFF; }
+
+.badge, .badge-group {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--label-secondary);
+}
+.sidebar-item.active .badge, .sidebar-item.active .badge-group { color: rgba(255, 255, 255, 0.85); }
+
+/* --- Content --- */
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--separator);
+  flex-shrink: 0;
+}
+
+.url-input {
+  flex: 1;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  background: var(--bg-window);
+  color: var(--label);
+  font-size: 13px;
+}
+.url-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.filter-input {
+  width: 140px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  background: var(--bg-window);
+  color: var(--label);
+  font-size: 12px;
+}
+
+.format-status {
+  font-size: 11px;
+  color: var(--label-tertiary);
+  white-space: nowrap;
+}
+
+.resolution-select {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  background: var(--bg-window);
+  color: var(--label);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.btn-primary {
+  height: 26px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: default;
+}
+.btn-primary:disabled { opacity: 0.4; }
+
+.btn-secondary {
+  height: 26px;
+  padding: 0 14px;
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--label);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: default;
+}
+.btn-secondary:hover { background: var(--bg-window); }
+
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--separator);
+}
+
+.view { flex: 1; overflow: hidden; position: relative; display: flex; flex-direction: column; }
+
+/* --- Table (CSS Grid, not <table>) --- */
+/* HTML table-layout:fixed proved unreliable for enforcing explicit column
+   widths in this app's actual WKWebView runtime — correct CSS, verified
+   present in the compiled output, simply wasn't being honored (columns
+   rendered at content-driven auto width regardless). Rather than keep
+   guessing at why, the table is built from a CSS Grid instead: each
+   "table" is one grid container (.grid-table) whose grid-template-columns
+   is set inline per instance (see DownloadsTable.tsx/HistoryTable.tsx) and
+   updated directly by the resize drag handler — grid track sizing is
+   unambiguous and doesn't depend on any row-content-based sizing algorithm.
+   Row wrappers use display:contents so every header/body cell becomes a
+   direct grid item and lines up under the shared column template. */
+.table-scroll { flex: 1; overflow: auto; }
+
+.grid-table {
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+}
+
+.grid-row { display: contents; }
+
+.grid-cell {
+  padding: 0 12px;
+  border-bottom: 1px solid var(--separator);
+  overflow: hidden; /* column width is the grid track width — truncate, never wrap */
+  display: flex;
+  align-items: center;
+}
+
+.grid-header .grid-cell {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-window);
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--label-tertiary);
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+}
+.col-resize-handle:hover, .col-resize-handle.resizing { background: var(--accent); opacity: 0.5; }
+
+.grid-row:not(.grid-header) .grid-cell { height: 44px; } /* Finder list-view row density, per DESIGN.md */
+.grid-row:not(.grid-header):hover .grid-cell { background: var(--bg-row-hover); }
+
+.col-progress, .col-speed, .col-size, .col-completed {
+  font-variant-numeric: tabular-nums;
+  color: var(--label-secondary);
+  white-space: nowrap;
+}
+
+/* min-width: 0 overrides the flex-item default of min-width: auto (which
+   uses the text's own intrinsic width as a floor) — without it, a flex
+   child never shrinks below its content's natural width, so it overflows
+   .grid-cell instead of truncating, regardless of overflow/ellipsis rules. */
+.row-title {
+  display: block;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--label);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-url {
+  display: block;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.progress-track {
+  width: 70px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--separator);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--status-downloading);
+  transition: width 200ms ease-out;
+}
+.progress-pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--label-secondary);
+  font-size: 12px;
+  min-width: 32px;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-completed .status-dot { background: var(--status-completed); }
+.status-downloading .status-dot { background: var(--status-downloading); }
+.status-paused .status-dot { background: var(--status-paused); }
+.status-failed .status-dot { background: var(--status-failed); }
+
+/* Interrupted gets motion, not just color — resolves the ambiguity with
+   Failed noted in the design review. Transient/auto-retrying = pulsing. */
+.status-interrupted .status-dot {
+  background: var(--status-interrupted);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* --- Context menu (right-click on a row) --- */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 190px;
+  padding: 4px;
+  background: var(--bg-window);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 10px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--label);
+  cursor: default;
+}
+/* JS-driven (onMouseEnter/onMouseLeave in React), not :hover — WKWebView
+   doesn't apply :hover to an element that appears directly under an
+   already-stationary cursor (a right-click menu's first item usually is),
+   so a pure-CSS :hover rule silently never engages until the mouse moves. */
+.context-menu-item.is-hovered:not(:disabled) { background: var(--accent); color: #FFFFFF; }
+.context-menu-item:disabled { color: var(--label-tertiary); }
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--separator);
+}
+
+/* --- Empty state --- */
+.empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+}
+.empty-icon {
+  font-size: 32px;
+  color: var(--label-tertiary);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 1.5px solid var(--separator);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.empty-title { font-size: 15px; font-weight: 600; color: var(--label); }
+.empty-subtitle { font-size: 12px; color: var(--label-secondary); max-width: 320px; }
+
+/* --- Status bar --- */
+.status-bar {
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-top: 1px solid var(--separator);
+  font-size: 11px;
+  color: var(--label-secondary);
+}
+
+/* --- Bridge error banner (window.pywebview handshake failed) --- */
+.bridge-error-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2000;
+  padding: 6px 12px;
+  background: var(--status-failed);
+  color: #FFFFFF;
+  font-size: 12px;
+  text-align: center;
+}

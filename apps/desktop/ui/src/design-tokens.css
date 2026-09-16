@@ -1,0 +1,36 @@
+/* Design tokens — see /DESIGN.md. SF Pro (system font) only, 8pt grid,
+   44px rows, minimal-functional motion, real system accent color. */
+
+:root {
+  /* Chrome accent: prefer the OS accent color if the engine exposes it
+     (AccentColor is a CSS system color, Safari/WebKit support varies);
+     fall back to system blue, matching today's macOS default. */
+  --accent: AccentColor, #007AFF;
+
+  /* Status colors — semantic, fixed, independent of --accent. */
+  --status-completed: #30D158;
+  --status-downloading: #0A84FF;
+  --status-paused: #8E8E93;
+  --status-interrupted: #FF9F0A;
+  --status-failed: #FF453A;
+
+  --bg-window: #FFFFFF;
+  --bg-sidebar: #F2F1F6;
+  --bg-row-hover: rgba(0, 0, 0, 0.04);
+  --separator: rgba(0, 0, 0, 0.1);
+  --label: #1D1D1F;
+  --label-secondary: rgba(0, 0, 0, 0.5);
+  --label-tertiary: rgba(0, 0, 0, 0.3);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-window: #1E1E1E;
+    --bg-sidebar: rgba(255, 255, 255, 0.04);
+    --bg-row-hover: rgba(255, 255, 255, 0.06);
+    --separator: rgba(255, 255, 255, 0.1);
+    --label: #F5F5F7;
+    --label-secondary: rgba(255, 255, 255, 0.55);
+    --label-tertiary: rgba(255, 255, 255, 0.35);
+  }
+}
