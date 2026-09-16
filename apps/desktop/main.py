@@ -155,7 +155,29 @@ def main():
         phải lúc import: `platforms/cocoa.py` gọi setActivationPolicy_(0) ngay
         khi module được import, nên mọi thay đổi trước đó sẽ bị ghi đè.
         """
-        statusbar.install(on_show=show_window, on_quit=quit_app, port=DESKTOP_PORT)
+        from services.history_service import HistoryService
+
+        hist = HistoryService()
+
+        def toggle(task_id):
+            task = hist.get_task(task_id)
+            if not task:
+                return
+            # Gọi thẳng endpoint dưới dạng hàm: cùng tiến trình, đi vòng qua HTTP
+            # của chính mình là thừa.
+            from apps.api.main import pause_download, resume_download
+            (resume_download if task["status"] == "paused" else pause_download)(task_id)
+
+        def cancel(task_id):
+            from apps.api.main import cancel_download
+            cancel_download(task_id)
+
+        statusbar.install(
+            on_show=show_window,
+            on_quit=quit_app,
+            port=DESKTOP_PORT,
+            task_actions={"list": hist.get_active_tasks, "toggle": toggle, "cancel": cancel},
+        )
 
     debug = os.getenv("DOWNLOADER_DEBUG") == "1"
     if debug:
