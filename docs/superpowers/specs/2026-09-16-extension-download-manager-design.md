@@ -22,6 +22,7 @@ Extension hiện bắt được stream và tải được, nhưng dừng ở đ�
 | Popup chỉ hiện host bắt được | Không biết gì về việc đang tải |
 | Panel chỉ hiện "chất lượng tốt nhất" | Danh sách format không lên được vì trước đây gọi sai đường |
 | Không tải được riêng âm thanh | `yt-dlp` làm được, UI chưa phơi ra |
+| Menu bar không biết gì về download | Đóng trình duyệt là mù hẳn về tiến trình |
 
 Thêm hai khoản nợ kỹ thuật cần cắt trong cùng đợt (§8).
 
@@ -60,6 +61,7 @@ header `X-Streamloot-Extension-Id`. Đã ghi ở ADR 0005 §7.5.
 | D2 | **Danh sách download là toàn cục** | Download sống ở backend chứ không sống trong tab; hiển thị theo tab là nói dối về nơi nó chạy |
 | D3 | **Chỉ hiện NÚT NỔI khi bắt được stream; panel mở khi bấm** | Giữ giá trị B8 (thấy ngay là tải được) mà không chiếm chỗ trên trang |
 | D4 | **Polling, không streaming** | §2.1. B (keep-alive) không sửa được giới hạn 5 phút; C (offscreen) không có `reason` hợp lệ cho việc giữ kết nối mạng |
+| D5 | **Menu bar hiện MỘT video đang tải + pause/resume/stop, xong thì ẩn** | Bề mặt duy nhất còn lại khi đóng trình duyệt. Một dòng là đủ để liếc; danh sách đầy đủ ở panel |
 
 ## 4. Kiến trúc
 
@@ -73,7 +75,12 @@ header `X-Streamloot-Extension-Id`. Đã ghi ở ADR 0005 §7.5.
 └──────────────────────────┘   └─────────────────────────┘   └──────────────────┘
                                           ▲
 ┌─ Popup (extension page) ─┐              │
-│ Tóm tắt + tiến trình     │──────────────┘  (hoặc fetch thẳng, cùng origin quyền)
+│ Tóm tắt + tiến trình     │──────────────┘  (fetch thẳng, là extension page)
+└──────────────────────────┘
+
+┌─ Menu bar (app macOS) ───┐
+│ 1 video + pause/stop     │──► đọc thẳng HistoryService, KHÔNG qua HTTP
+│ dựng lại mỗi lần mở      │    (cùng tiến trình — xem §5.4)
 └──────────────────────────┘
 ```
 
@@ -98,6 +105,7 @@ gọi `/downloads/active`.
 | Popup đang mở | **1s**, gọi thẳng backend | Popup là extension page, fetch được |
 | Không mở gì, có task chạy | **60s** qua `chrome.alarms` | Đủ để badge và cache không lệch quá xa |
 | Không có task nào | **không poll** | Không đốt tài nguyên vô ích |
+| Menu bar macOS | **không poll bao giờ** | macOS gọi `menuNeedsUpdate_` ngay trước khi hiện menu — đọc một phát tại đúng thời điểm đó (§5.4) |
 
 Poll dừng ngay khi mọi task về trạng thái kết thúc.
 
@@ -208,6 +216,60 @@ hụt. Điều khiển nằm ở panel.
 
 Đang tải được ưu tiên hơn số stream bắt được — nó là thông tin cấp bách hơn.
 
+### 5.4. Menu trên menu bar (app macOS)
+
+Bề mặt thứ tư, và là **bề mặt duy nhất còn lại khi đóng cả trình duyệt lẫn cửa sổ
+app** — đúng lúc bạn cần biết tiến trình nhất.
+
+**Không có download nào** — giữ nguyên như hiện tại:
+
+```
+⤓
+├ Mở cửa sổ Streamloot
+├ ────────────────────
+├ Backend: 127.0.0.1:8001      (mờ, không bấm được)
+├ ────────────────────
+└ Thoát Streamloot         ⌘Q
+```
+
+**Đang tải** — chèn thêm một khối lên đầu:
+
+```
+⤓
+├ Tên video…                62%   (mờ, chỉ để đọc)
+├ ⏸  Tạm dừng
+├ ✕  Huỷ
+├ ────────────────────
+├ Mở cửa sổ Streamloot
+├ ────────────────────
+├ Backend: 127.0.0.1:8001      (mờ)
+├ ────────────────────
+└ Thoát Streamloot         ⌘Q
+```
+
+**Đang tạm dừng** — dòng trạng thái đổi thành `Tạm dừng`, và `⏸ Tạm dừng` đổi
+thành `▶ Tiếp tục`.
+
+Quy tắc:
+
+| Quy tắc | Lý do |
+|---|---|
+| Chỉ hiện **một** video | Menu bar để liếc, không phải để quản lý. Danh sách đầy đủ ở panel |
+| Nếu có nhiều task, lấy **cái khởi động gần nhất** | Gần như luôn là cái người dùng vừa bấm, tức cái họ đang quan tâm |
+| Tải xong là **ẩn hẳn khối này** | Không để lại dòng "100%" trơ ra sau khi việc đã xong |
+| Tên video cắt ngắn (~40 ký tự) | Menu bar hẹp; tên đầy đủ đã có ở panel và cửa sổ app |
+
+**Thay đổi kỹ thuật bắt buộc:** `apps/desktop/statusbar.py` hiện dựng `NSMenu`
+**một lần** lúc cài đặt, nên nội dung đóng băng vĩnh viễn. Phải thêm
+`NSMenuDelegate` và cài `menuNeedsUpdate_` để dựng lại mỗi lần người dùng mở menu.
+
+Đổi lại được một tính chất đáng giá: **menu bar không cần poll gì cả.** macOS gọi
+`menuNeedsUpdate_` ngay trước khi hiện menu, nên chỉ cần đọc một phát từ
+`HistoryService` tại đúng thời điểm đó. Khác hẳn panel và popup (§4.2).
+
+Ba nút gọi thẳng service nội bộ, **không qua HTTP** — app đang ở trong cùng tiến
+trình, đi vòng qua chính API của mình là thừa.
+
 ## 6. Thay đổi backend
 
 ### 6.1. Cột `source` (D1)
@@ -263,6 +325,10 @@ nó là đường B9 cho site mà extension bó tay.
 **Không bỏ** token dùng-một-lần cho SSE: desktop UI dùng `EventSource` và nó
 không set được header.
 
+**`statusbar.py` sẽ lớn lên** khi thêm menu động. Nếu vượt ~200 dòng thì tách
+phần dựng menu ra `apps/desktop/statusbar_menu.py`, giữ `statusbar.py` lo vòng đời
+và activation policy.
+
 ## 9. Kiểm thử
 
 | Tầng | Kiểm gì |
@@ -273,6 +339,8 @@ không set được header.
 | Extension | Hồi phục: xoá sạch cache rồi gọi `/downloads/active` phải dựng lại đủ danh sách |
 | Thủ công | Tải một video **dài hơn 5 phút**, đóng panel, đổi trang, mở lại — tiến trình phải còn đúng. Đây là ca mà thiết kế cũ hỏng |
 | Thủ công | Pause giữa chừng, đợi, resume — file cuối cùng phải nguyên vẹn |
+| Thủ công | **Đóng hẳn trình duyệt** trong lúc tải, mở menu bar — phải thấy đúng tiến trình và bấm tạm dừng được |
+| Thủ công | Tải xong, mở lại menu bar — khối download phải biến mất hoàn toàn |
 
 ## 10. Không làm (YAGNI)
 
