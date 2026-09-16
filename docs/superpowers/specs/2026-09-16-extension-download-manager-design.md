@@ -1,7 +1,7 @@
 # Thiết kế: Extension thành trình quản lý tải
 
 Ngày: 2026-09-16
-Trạng thái: **Chờ duyệt**
+Trạng thái: **Đã duyệt** (2026-09-16)
 Liên quan: [ADR 0005](../../ADR/0005-stream-capture-architecture.md), [ADR 0006](../../ADR/0006-extension-tech-stack.md)
 
 > **Privacy:** tài liệu này được commit công khai. Không nêu tên miền của bất kỳ
