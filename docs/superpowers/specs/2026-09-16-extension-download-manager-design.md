@@ -59,7 +59,7 @@ header `X-Streamloot-Extension-Id`. Đã ghi ở ADR 0005 §7.5.
 |---|---|---|
 | D1 | **Backend sở hữu lịch sử, extension cache local** | Một nguồn sự thật, sống qua lần gỡ/cài lại; cache để popup mở ra hiện ngay, không đợi mạng |
 | D2 | **Danh sách download là toàn cục** | Download sống ở backend chứ không sống trong tab; hiển thị theo tab là nói dối về nơi nó chạy |
-| D3 | **Chỉ hiện NÚT NỔI khi bắt được stream; panel mở khi bấm** | Giữ giá trị B8 (thấy ngay là tải được) mà không chiếm chỗ trên trang |
+| D3 | **Nút nổi trên video → panel CHỈ chọn format. Quản lý nằm ở popup** | Panel sống trong trang người khác nên phải nhỏ; popup là bề mặt của riêng extension nên chứa được tab |
 | D4 | **Polling, không streaming** | §2.1. B (keep-alive) không sửa được giới hạn 5 phút; C (offscreen) không có `reason` hợp lệ cho việc giữ kết nối mạng |
 | D5 | **Menu bar hiện MỘT video đang tải + pause/resume/stop, xong thì ẩn** | Bề mặt duy nhất còn lại khi đóng trình duyệt. Một dòng là đủ để liếc; danh sách đầy đủ ở panel |
 
@@ -69,13 +69,14 @@ header `X-Streamloot-Extension-Id`. Đã ghi ở ADR 0005 §7.5.
 ┌─ Trang web ──────────────┐   ┌─ Service Worker ────────┐   ┌─ Backend ────────┐
 │ Nút nổi trên video       │   │                         │   │                  │
 │  └ bấm → Panel           │◄─►│ Bộ nhớ trạng thái tải   │◄─►│ /downloads/*     │
-│      ├ tab Tải           │   │ Poll khi có người xem   │   │ /history?source= │
-│      └ tab Lịch sử       │   │ chrome.alarms đối soát  │   │ /formats/prepared│
+│     (CHỈ chọn format)    │   │ Poll khi có người xem   │   │ /history?source= │
+│  all_frames: true        │   │ chrome.alarms đối soát  │   │ /formats/prepared│
 │  (không fetch trực tiếp) │   │                         │   │ /downloads/active│
 └──────────────────────────┘   └─────────────────────────┘   └──────────────────┘
                                           ▲
 ┌─ Popup (extension page) ─┐              │
-│ Tóm tắt + tiến trình     │──────────────┘  (fetch thẳng, là extension page)
+│ tab Tải  + điều khiển    │──────────────┘  (fetch thẳng, là extension page)
+│ tab Lịch sử              │
 └──────────────────────────┘
 
 ┌─ Menu bar (app macOS) ───┐
@@ -89,7 +90,7 @@ header `X-Streamloot-Extension-Id`. Đã ghi ở ADR 0005 §7.5.
 | Dữ liệu | Nguồn sự thật | Cache |
 |---|---|---|
 | Task đang chạy (tiến trình, trạng thái) | Backend (`download_tasks`) | `storage.session` trong SW |
-| Lịch sử đã tải xong | Backend (`download_history`) | `storage.local` trong SW |
+| Lịch sử đã tải xong | Backend (`download_history`) | `storage.local` trong SW, **20 mục gần nhất** |
 | Manifest bắt được theo tab | Service worker | `storage.session` |
 | Cấu hình (cổng, concurrency) | `storage.local` | — |
 
@@ -111,49 +112,43 @@ Poll dừng ngay khi mọi task về trạng thái kết thúc.
 
 ## 5. Thiết kế UI
 
-### 5.1. Nút nổi gắn vào video
+### 5.1. Nút nổi trên video → panel chọn format
 
-Panel **không** tự bung ra thành một hộp. Mặc định nó chỉ là **một nút nhỏ**, neo
-ở **góc trên bên phải của video đang phát**. Bấm vào mới mở.
+Mặc định chỉ là **một nút nhỏ**, neo ở **góc trên bên phải video đang phát**.
 
 ```
 ┌─ video ────────────────────────────┐
-│                            [ ⤓ ]   │  ← nút nổi, góc trên phải
-│                                    │
+│                            [ ⤓ ]   │  ← nút nổi
 │            (video đang phát)       │
-│                                    │
 └────────────────────────────────────┘
 ```
 
-Bấm nút → mở panel, mặc định ở tab **Tải**:
+Bấm nút → panel. **Panel chỉ làm một việc: chọn format.** Không có tab, không có
+tiến trình, không có lịch sử.
 
 ```
-┌────────────────────────────────────────┐
-│ Chọn để tải              [Tải][Lịch sử]✕│  ← tab
-├────────────────────────────────────────┤
-│ 🎬 VIDEO                               │
-│  HD          720p            .mp4      │  ← bấm thẳng vào dòng là tải
-│  Standard    480p            .mp4      │
-│  Medium      360p            .mp4      │
-│                                        │
-│ 🎵 ÂM THANH                            │
-│  Medium      128kbps         .mp3      │
-├────────────────────────────────────────┤
-│ ── Đang tải ──                         │
-│  Tên video                      62%    │
-│  ████████████░░░░░  3.2MB/s            │
-│  [⏸] [✕]                               │
-└────────────────────────────────────────┘
+┌────────────────────────────────┐
+│ Chọn để tải                  ✕ │
+├────────────────────────────────┤
+│ 🎬 VIDEO                       │
+│  HD         720p        .mp4   │  ← bấm thẳng vào dòng là tải
+│  Standard   480p        .mp4   │
+│  Medium     360p        .mp4   │
+│                                │
+│ 🎵 ÂM THANH                    │
+│  Medium     128kbps     .mp3   │
+└────────────────────────────────┘
 ```
 
-Khác biệt so với bản hiện tại:
+Bấm một dòng → gửi lệnh tải → panel đóng lại. Muốn xem tiến trình thì mở popup
+(§5.2). **Panel không theo dõi gì sau khi đã bàn giao** — nó là bộ chọn format,
+không phải trình quản lý.
 
-| Bản hiện tại | Bản này |
+| Nguyên tắc | Lý do |
 |---|---|
-| Hộp tự bung ở góc màn hình | Nút nhỏ neo vào video, bấm mới mở |
-| Một `<select>` thả xuống | Danh sách phẳng, bấm thẳng vào dòng là tải |
-| Chỉ có video | Tách nhóm **VIDEO** và **ÂM THANH** |
-| Không thấy độ phân giải cho tới khi mở select | Thấy ngay nhãn + độ phân giải + đuôi file |
+| Panel không có tab | Nó sống trong trang của người khác, chiếm chỗ càng ít càng tốt |
+| Bấm dòng là tải luôn, không cần nút xác nhận | Một thao tác thay vì hai; chọn nhầm thì huỷ ở popup |
+| Đóng ngay sau khi bấm | Việc của nó xong rồi; để lại là chắn mất video |
 
 ### 5.1.1. Neo nút vào video: ràng buộc thật
 
@@ -171,40 +166,63 @@ dụng. Đọc *vị trí* của phần tử video là việc khác hẳn và ho
 | **Video nằm trong iframe** | Xem bên dưới |
 
 **Iframe là ca nghiêm trọng nhất.** Đo thật cho thấy **2 trong 3 site đích phục vụ
-stream qua iframe player riêng** (ADR 0005 §7.1). Content script hiện chỉ chạy ở
-khung trên cùng, nên **không thấy** phần tử video nằm trong iframe và không neo
-vào nó được.
+stream qua iframe player riêng** (ADR 0005 §7.1). Content script ở khung trên cùng
+không thấy phần tử video bên trong iframe.
 
-Hai cách, cần chọn:
+**Đã chốt: bật `all_frames: true`.** Neo vào phần tử `<iframe>` thì nút nằm đúng
+góc iframe chứ không phải góc *video* — mà iframe thường có viền, thanh điều khiển
+riêng, hoặc lớn hơn video. Bật `all_frames` cho kết quả đúng.
 
-- **`all_frames: true`** — content script chạy trong mọi khung, khung nào có video
-  thì khung đó dựng nút. Đơn giản và đúng, nhưng nhân số instance content script
-  lên theo số iframe của trang (quảng cáo, tracker…), và cần cơ chế để chỉ một
-  khung dựng panel.
-- **Giữ khung trên cùng, neo vào phần tử `<iframe>`** thay vì vào video bên trong.
-  Nút vẫn nằm đúng góc trên phải vùng phát. Rẻ hơn nhiều, và người dùng không
-  phân biệt được. **Đề xuất cách này.**
+Ba hệ quả phải xử lý, nếu không nó thành gánh nặng:
 
-### 5.2. Popup — tóm tắt
+| Hệ quả | Cách xử lý |
+|---|---|
+| Content script chạy trong **mọi** iframe, kể cả quảng cáo và tracker | **Thoát ngay** nếu khung không có phần tử `<video>` nào. Kiểm tra này gần như miễn phí và loại bỏ tuyệt đại đa số khung |
+| Nhiều khung cùng dựng nút → nhiều nút trên một trang | Mỗi khung chỉ dựng nút cho video **trong chính nó**. Khung không có video thì đã thoát ở bước trên. Trang có nhiều video thật thì nhiều nút là đúng |
+| Khung con gửi tin nhắn cho service worker | Không phải xử lý gì thêm — `sender.tab.id` giống nhau cho mọi khung của cùng một tab, nên việc gom manifest theo tab vẫn đúng |
+
+### 5.2. Popup — hai tab
+
+Bấm icon extension. Đây là nơi **quản lý**, tách hẳn khỏi trang web.
 
 ```
-┌──────────────────────────────┐
-│ Streamloot                   │
-│ ● Đã kết nối    127.0.0.1:8001│
-├──────────────────────────────┤
-│ Đang tải 2                   │
-│ Tên video            62% ▓▓░ │
-│ Tên video khác    Tạm dừng   │
-├──────────────────────────────┤
-│ Bắt được trên tab này: 2     │
-│ cdn-host                     │
-├──────────────────────────────┤
-│ [Cài đặt]                    │
-└──────────────────────────────┘
+┌──────────────────────────────────┐
+│ Streamloot          [Tải][Lịch sử]│  ← tab
+│ ● Đã kết nối     127.0.0.1:8001  │
+├──────────────────────────────────┤
+│ TAB TẢI                          │
+│                                  │
+│ Tên video                   62%  │
+│ ████████████░░░░░  3.2MB/s       │
+│ [⏸] [✕]                          │
+│                                  │
+│ Tên video khác        Tạm dừng   │
+│ ██████░░░░░░░░░░░                │
+│ [▶] [✕]                          │
+│                                  │
+│ ── Bắt được trên tab này: 2 ──   │
+│ cdn-host                         │
+├──────────────────────────────────┤
+│ [Cài đặt]                        │
+└──────────────────────────────────┘
 ```
 
-Popup **không** có nút pause/cancel: nó đóng lại khi mất focus, nên thao tác dễ
-hụt. Điều khiển nằm ở panel.
+**Tab Lịch sử** — danh sách phẳng những file đã tải qua extension:
+
+```
+│ TAB LỊCH SỬ                      │
+│ Tên video          ✓  2 phút trước│
+│ [Hiện trong Finder]               │
+│ Tên video khác     ✗  Thất bại    │
+```
+
+| Tab | Nội dung | Phạm vi |
+|---|---|---|
+| **Tải** | Download đang chạy + điều khiển + stream bắt được trên tab hiện tại | Download: **toàn cục** (D2). Stream bắt được: **theo tab** |
+| **Lịch sử** | File đã tải xong qua extension | Toàn cục, từ backend (D1) |
+
+Popup **có** nút pause/resume/cancel — khác với ghi chú ở bản trước. Nó là bề mặt
+quản lý chính của extension, nên phải điều khiển được.
 
 ### 5.3. Badge trên icon
 
@@ -287,7 +305,7 @@ backfill, vì không có cách nào biết ngược.
 
 | Endpoint | Thay đổi |
 |---|---|
-| `GET /api/v1/downloads/active` | **Mới.** Trả mọi task chưa ở trạng thái kết thúc. Đây là đường hồi phục khi service worker bị thu hồi |
+| `GET /api/v1/downloads/active` | **Mới.** Trả mọi task chưa kết thúc, **bao gồm cả `paused`**. Đường hồi phục khi service worker bị thu hồi |
 | `GET /api/v1/history` | Thêm tham số `?source=` để lọc |
 | `POST /api/v1/downloads/prepared` | Ghi `source='extension'` |
 | `POST /api/v1/downloads` | Nhận `source` tuỳ chọn, mặc định `unknown` |
@@ -336,7 +354,8 @@ và activation policy.
 | Backend | `source` ghi đúng cho từng đường vào; `?source=` lọc đúng; `/downloads/active` chỉ trả task chưa kết thúc; pause/resume/cancel giữ nguyên mã lỗi 404/409 |
 | Backend | Migration chạy được trên CSDL đã có dữ liệu, bản ghi cũ thành `unknown` |
 | Extension | Máy trạng thái poll: bắt đầu khi có task, dừng khi hết, đổi nhịp theo việc có ai đang xem |
-| Extension | Hồi phục: xoá sạch cache rồi gọi `/downloads/active` phải dựng lại đủ danh sách |
+| Extension | Hồi phục: xoá sạch cache rồi gọi `/downloads/active` phải dựng lại đủ danh sách, gồm cả task đang tạm dừng |
+| Extension | `all_frames`: khung không có `<video>` phải thoát ngay, không dựng gì |
 | Thủ công | Tải một video **dài hơn 5 phút**, đóng panel, đổi trang, mở lại — tiến trình phải còn đúng. Đây là ca mà thiết kế cũ hỏng |
 | Thủ công | Pause giữa chừng, đợi, resume — file cuối cùng phải nguyên vẹn |
 | Thủ công | **Đóng hẳn trình duyệt** trong lúc tải, mở menu bar — phải thấy đúng tiến trình và bấm tạm dừng được |
@@ -350,11 +369,13 @@ và activation policy.
 - **Tải lại từ mục lịch sử.** Nghe hợp lý nhưng URL stream thường có hạn sử dụng — bấm vào là hỏng, tệ hơn là không có nút.
 - **Đồng bộ lịch sử giữa nhiều máy.** Không có máy chủ, và cũng không ai cần.
 
-## 11. Câu hỏi mở
+## 11. Câu hỏi mở — đã chốt hết
 
-1. **Neo vào iframe hay bật `all_frames`?** Đề xuất neo vào phần tử `<iframe>` ở
-   khung trên cùng (§5.1.1) — rẻ hơn hẳn và người dùng không phân biệt được. Cần
-   xác nhận trên site thứ ba trước khi chốt.
-2. **Giữ bao nhiêu mục lịch sử trong cache local?** Đề xuất 200, cắt cũ nhất. Chưa đo dung lượng thật.
-3. **`/downloads/active` có nên trả cả task `paused` không?** Đề xuất có — nó chưa kết thúc, và người dùng cần thấy để bấm resume.
-4. **Nhịp poll 1s có quá dày khi tải nhiều file cùng lúc?** Một lời gọi trả cả danh sách nên chi phí không nhân lên, nhưng chưa đo với 5+ task.
+| # | Câu hỏi | Chốt |
+|---|---|---|
+| 1 | Neo vào iframe hay bật `all_frames`? | **`all_frames: true`**, kèm ba biện pháp giảm chi phí ở §5.1.1 |
+| 2 | Cache lịch sử bao nhiêu mục? | **20**. Đủ cho "vừa tải gì"; muốn xem xa hơn thì mở cửa sổ app |
+| 3 | `/downloads/active` có trả task `paused` không? | **Có.** Nó chưa kết thúc, và người dùng cần thấy để bấm tiếp tục |
+| 4 | Nhịp poll 1s có quá dày? | **Giữ 1s.** Một lời gọi trả cả danh sách nên chi phí không nhân theo số task |
+
+Không còn câu hỏi mở. Spec sẵn sàng để chuyển sang implementation plan.
