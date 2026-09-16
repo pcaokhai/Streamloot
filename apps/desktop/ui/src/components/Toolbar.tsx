@@ -42,7 +42,10 @@ export function Toolbar({
           // — no need to click back into the URL field first.
           onKeyDown={onKeyDownTriggersDownload}
         >
-          <option value="">Best</option>
+          {/* Kèm độ phân giải cao nhất vào nhãn: một chữ "Best" trần không phân
+              biệt được với trạng thái fallback khi không load được format, nên
+              người dùng không biết danh sách đã về hay chưa. */}
+          <option value="">Best ({resolutionHeights[0]}p)</option>
           {resolutionHeights.map((h) => (
             <option key={h} value={h}>{h}p</option>
           ))}

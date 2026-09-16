@@ -685,6 +685,21 @@ Phép thử thật nằm ở B1: gửi `VideoInfo` không cookie xuống `yt-dlp
    không?~~ **ĐÃ ĐO — 3/3, xem §7.** Probe nằm ở `apps/extension/`.
 4. **Phân phối:** app local đã đóng gói `.app` được (`build_app.sh`). Extension đi
    kèm thế nào — Chrome Web Store, hay load unpacked cho cá nhân dùng?
+
+   **Đã phát sinh triệu chứng cụ thể (2026-09-16):** app hiện chỉ ký **ad-hoc**
+   (`codesign -dv` → `Signature=adhoc`, `TeamIdentifier=not set`) vì PyInstaller
+   tự ký khi không có Developer ID. Khi extractor dùng browser điều khiển Chrome
+   trong `/Applications`, macOS bật **App Management protection** và hiện thông
+   báo *"Streamloot was prevented from modifying apps on your Mac"*.
+
+   Việc extract **vẫn chạy** — thứ bị chặn không thiết yếu. Nhưng với người dùng
+   thì đó là một thông báo bảo mật đáng ngại xuất hiện không rõ lý do, và nó sẽ
+   xuất hiện trên mọi máy cài bản chưa ký.
+
+   Ba hướng: (a) người dùng tự cho phép ở System Settings → Privacy & Security →
+   App Management; (b) ký Developer ID + notarize — cách sửa thật, và `--sign` đã
+   có sẵn trong `build_app.sh`; (c) đóng gói kèm Chromium riêng để không đụng app
+   trong `/Applications` — thêm ~150MB, không đáng.
 5. **Có áp dụng ý tưởng lai ở §2.5b không** (handshake qua Native Messaging, phần
    còn lại giữ HTTP+SSE)? Nó giải được hai điểm treo của ADR 0004 — phân phối
    `API_KEY` và ghim `chrome-extension://<ID>` — nhưng thêm một bước cài đặt: phải
