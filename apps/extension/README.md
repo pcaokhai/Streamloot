@@ -50,6 +50,12 @@ tiến trình local cũng đọc được API key từ môi trường của app,
 không bảo vệ nổi trường hợp này. Không phải đổi an toàn lấy tiện lợi — chỉ là bỏ
 một bước copy-paste không mua thêm gì.
 
+**Content script KHÔNG gọi HTTP.** Trong MV3, `fetch` từ content script được
+Chrome gắn origin của **trang**, không phải của extension — nên backend (nhận
+diện extension qua `Origin`) trả 401. Mọi lời gọi đi qua service worker, nơi có
+đúng origin `chrome-extension://<id>`. Panel nhắn tin cho nó và nhận tiến trình
+đẩy ngược về. Đây là ràng buộc của nền tảng, không phải lựa chọn phong cách.
+
 **Dùng `fetch` + `ReadableStream` cho tiến trình, không dùng `EventSource`.**
 MV3 service worker không có `EventSource`. Đổi lại được thứ tốt hơn: `fetch` set
 được header `Authorization`, nên không cần token dùng-một-lần và nối lại stream

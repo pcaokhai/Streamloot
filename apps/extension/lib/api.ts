@@ -47,13 +47,24 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
-export async function ping(): Promise<boolean> {
+export type Health = 'ok' | 'unreachable' | 'rejected';
+
+/**
+ * Trả về BA trạng thái, không phải boolean.
+ *
+ * Gộp "không tới được" và "bị từ chối" làm một là nói dối người dùng: app chưa
+ * chạy thì mở app, còn bị từ chối thì ID extension không khớp — hai cách sửa
+ * hoàn toàn khác nhau.
+ */
+export async function health(): Promise<Health> {
+  let res: Response;
   try {
-    const res = await fetch(`${await baseUrl()}/history`, { headers: jsonHeaders() });
-    return res.ok;
+    res = await fetch(`${await baseUrl()}/history`, { headers: jsonHeaders() });
   } catch {
-    return false;
+    return 'unreachable';
   }
+  if (res.status === 401 || res.status === 403) return 'rejected';
+  return res.ok ? 'ok' : 'rejected';
 }
 
 export function listFormats(info: VideoInfoPayload): Promise<{ title: string; formats: FormatOption[] }> {

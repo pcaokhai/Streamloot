@@ -11,14 +11,19 @@ async function render() {
   const caps = document.getElementById('caps')!;
   const { port } = await loadSettings();
 
-  // B6 — nói rõ vì sao không kết nối được. Người dùng sửa "app chưa chạy" và
-  // "app từ chối" theo hai cách hoàn toàn khác nhau.
-  if (await api.ping()) {
+  // B6 — ba trạng thái, không phải hai. "App chưa chạy" và "app từ chối" sửa
+  // theo hai cách hoàn toàn khác nhau; gộp lại là chỉ sai đường cho người dùng.
+  const state = await api.health();
+  if (state === 'ok') {
     status.innerHTML = '<span class="dot on"></span>Đã kết nối';
     hint.textContent = `Backend 127.0.0.1:${port}`;
+  } else if (state === 'unreachable') {
+    status.innerHTML = '<span class="dot off"></span>App chưa chạy';
+    hint.textContent = `Không gọi được 127.0.0.1:${port}. Mở app Streamloot — kiểm tra icon ⤓ trên menu bar.`;
   } else {
-    status.innerHTML = '<span class="dot off"></span>Không kết nối được';
-    hint.textContent = `Không gọi được 127.0.0.1:${port}. App Streamloot đã chạy chưa? Kiểm tra icon ⤓ trên menu bar.`;
+    status.innerHTML = '<span class="dot off"></span>App từ chối extension này';
+    hint.textContent =
+      'App đang chạy nhưng không nhận diện được extension. Thường là do bản build thiếu `key` trong manifest nên ID không khớp. Build lại rồi Reload extension.';
   }
 
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });

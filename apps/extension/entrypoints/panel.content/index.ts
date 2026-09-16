@@ -13,9 +13,17 @@
  * đáng tin là những gì service worker quan sát được từ network.
  */
 import './style.css';
-import * as api from '../../lib/api';
-import { BackendError } from '../../lib/api';
-import type { Capture, FormatOption, VideoInfoPayload } from '../../lib/types';
+import type { Capture, FormatOption, ProgressEvent, VideoInfoPayload } from '../../lib/types';
+
+/**
+ * Panel KHÔNG gọi HTTP trực tiếp.
+ *
+ * Trong MV3, `fetch` từ content script được Chrome gắn origin của TRANG chứ
+ * không phải của extension — backend nhận diện extension qua Origin nên sẽ trả
+ * 401. Mọi lời gọi đi qua service worker, nơi có đúng origin
+ * `chrome-extension://<id>`.
+ */
+const ask = <T,>(msg: unknown): Promise<T> => browser.runtime.sendMessage(msg) as Promise<T>;
 
 function toPayload(cap: Capture): VideoInfoPayload {
   return {
@@ -35,7 +43,8 @@ export default defineContentScript({
   async main(ctx) {
     let captures: Capture[] = [];
     let mounted = false;
-    let abort: AbortController | null = null;
+    let activeTask: string | null = null;
+    let onProgress: ((e?: ProgressEvent, err?: string) => void) | null = null;
 
     const ui = await createShadowRootUi(ctx, {
       name: 'streamloot-panel',
@@ -104,44 +113,52 @@ export default defineContentScript({
       // cách IDM và Cốc Cốc làm (ADR 0005 §2.5d).
       const payload = toPayload(cap);
       say('Đang lấy danh sách chất lượng…');
-      api
-        .listFormats(payload)
-        .then(({ formats }: { formats: FormatOption[] }) => {
-          const heights = [...new Set(formats.map((f) => f.height).filter(Boolean))] as number[];
-          heights.sort((a, b) => b - a);
-          for (const h of heights) {
-            const o = document.createElement('option');
-            o.value = String(h);
-            o.textContent = `${h}p`;
-            select.append(o);
-          }
-          say(heights.length ? `${heights.length} chất lượng` : 'Chỉ có một chất lượng');
-        })
-        .catch((e: unknown) => {
+      void ask<{ ok: boolean; formats?: FormatOption[]; error?: string }>({
+        type: 'listFormats',
+        info: payload,
+      }).then((r) => {
+        if (!r.ok) {
           // Không chặn việc tải: backend vẫn tự chọn được chất lượng tốt nhất.
-          say(e instanceof BackendError ? e.message : 'Không lấy được danh sách chất lượng');
-        });
+          say(r.error ?? 'Không lấy được danh sách chất lượng');
+          return;
+        }
+        const heights = [...new Set((r.formats ?? []).map((f) => f.height).filter(Boolean))] as number[];
+        heights.sort((a, b) => b - a);
+        for (const h of heights) {
+          const o = document.createElement('option');
+          o.value = String(h);
+          o.textContent = `${h}p`;
+          select.append(o);
+        }
+        say(heights.length ? `${heights.length} chất lượng` : 'Chỉ có một chất lượng');
+      });
 
       btn.onclick = async () => {
         btn.disabled = true;
         say('Đang bắt đầu…');
-        try {
-          const { task_id } = await api.startDownload(payload, select.value || null);
-          bar.style.display = '';
-          abort = new AbortController();
-          await api.streamProgress(
-            task_id,
-            (e) => {
-              fill.style.width = `${Math.round(e.completed ?? 0)}%`;
-              say(`${e.description ?? e.status} · ${e.speed ?? ''}`.trim());
-            },
-            abort.signal,
-          );
-        } catch (e) {
-          say(e instanceof BackendError ? e.message : 'Tải thất bại', true);
-        } finally {
+        const r = await ask<{ ok: boolean; taskId?: string; error?: string }>({
+          type: 'startDownload',
+          info: payload,
+          formatId: select.value || null,
+        });
+        if (!r.ok) {
+          say(r.error ?? 'Tải thất bại', true);
           btn.disabled = false;
+          return;
         }
+        // Tiến trình do service worker đẩy về (xem onMessage 'progress').
+        activeTask = r.taskId ?? null;
+        onProgress = (e, err) => {
+          if (err) {
+            say(err, true);
+            btn.disabled = false;
+            return;
+          }
+          bar.style.display = '';
+          fill.style.width = `${Math.round(e?.completed ?? 0)}%`;
+          say(`${e?.description ?? e?.status ?? ''} · ${e?.speed ?? ''}`.trim());
+          if (e && ['completed', 'failed', 'cancelled'].includes(e.status)) btn.disabled = false;
+        };
       };
     }
 
@@ -158,8 +175,15 @@ export default defineContentScript({
     }
 
     browser.runtime.onMessage.addListener((msg) => {
-      const m = msg as { type?: string; captures?: Capture[] };
+      const m = msg as {
+        type?: string;
+        captures?: Capture[];
+        taskId?: string;
+        event?: ProgressEvent;
+        error?: string;
+      };
       if (m?.type === 'captures' && m.captures) surface(m.captures);
+      if (m?.type === 'progress' && m.taskId === activeTask) onProgress?.(m.event, m.error);
     });
 
     // Service worker có thể đã bắt được manifest TRƯỚC khi content script nạp
@@ -167,6 +191,8 @@ export default defineContentScript({
     const existing = (await browser.runtime.sendMessage({ type: 'getCaptures' })) as Capture[];
     if (existing?.length) surface(existing);
 
-    ctx.onInvalidated(() => abort?.abort());
+    ctx.onInvalidated(() => {
+      onProgress = null;
+    });
   },
 });
