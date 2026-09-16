@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** (2026-09-16) — chưa chốt. Xem mục "Cần xác nhận trước khi chốt" ở cuối.
+**Accepted** (2026-09-16) — probe Giai đoạn 0 cho 3/3, xem §7. Các câu hỏi còn mở ở §9.
 
 > **Lưu ý privacy:** Tài liệu này được commit công khai, nên các private extractor
 > được gọi bằng vai trò (Plugin A/B/C), không nêu tên file hay tên miền. Mapping
@@ -167,7 +167,7 @@ chỉ là **cầu mỏng**, nhận tín hiệu rồi bàn giao sang app IDM ch�
 
 #### (b) Ý tưởng lai: dùng Native Messaging chỉ cho cái bắt tay
 
-ADR 0004 (mục Consequences) và ADR này (§8) đều đang treo hai câu hỏi:
+ADR 0004 (mục Consequences) và ADR này (§9) đều đang treo hai câu hỏi:
 
 - Extension lấy `API_KEY` ở đâu mà không bắt user copy-paste tay?
 - `chrome-extension://<EXTENSION_ID>` cố định thế nào để đưa vào CORS allowlist?
@@ -291,9 +291,9 @@ trình duyệt rồi nhận hết nhược điểm của trình duyệt.
 
 ---
 
-## 4. Decision (đề xuất, chưa chốt)
+## 4. Decision
 
-Chọn **Phương án 2**, chia theo thế mạnh:
+Chọn **Phương án 2**, chia theo thế mạnh. Đã xác nhận bằng đo thực tế (§7):
 
 | Thành phần | Chịu trách nhiệm | Lý do |
 |---|---|---|
@@ -549,7 +549,68 @@ Mỗi giai đoạn kết thúc bằng một thứ chạy được. **Giai đoạ
 
 ---
 
-## 7. Consequences
+## 7. Kết quả đo Giai đoạn 0 (2026-09-16)
+
+Probe (`apps/extension/`) đã chạy trên cả 3 site. **Kết quả: 3/3.**
+
+| Plugin | Manifest bắt được? | Qua | Ngữ cảnh phiên bắt được |
+|---|---|---|---|
+| **A** (auto-click Turnstile) | ✅ | `url` | `referer, origin, ua` |
+| **B** (quét iframe) | ✅ | `url` | `referer, origin, ua` |
+| **C** (thu cookie + `clean_disguised_ts`) | ✅ | `url` | `origin, ua` — **thiếu `referer` và `cookie`** |
+
+~400 request được quan sát trong phiên đo, nên số 0 ở cột nào cũng là "không có",
+không phải "listener chết".
+
+### 7.1. Luận điểm trung tâm được xác nhận
+
+`webRequest` quan sát được manifest trên cả 3 site, trong session thật, **không
+cần một dòng auto-click Turnstile nào**. Đây đúng là thứ §1.2 dự đoán: cách
+headless hiện tại đang trả giá để giả lập cái mà trình duyệt người dùng đã có sẵn.
+
+Cả 3 site đều đưa manifest sang **CDN riêng**, khác tên miền trang. Hai trong ba
+đi qua **iframe player riêng** — cột "Trang" của probe hiển thị origin của iframe
+(từ `d.initiator`) chứ không phải tab, và điều đó xác nhận đúng kiến trúc mà
+Plugin B vốn đã phải quét iframe để xử lý.
+
+### 7.2. B12 chưa chứng minh được giá trị
+
+**Không có hit nào qua đường `content-type`** — cả 3 site đều lộ đuôi `.m3u8`
+trong URL. Giữ B12 vì nó rẻ và phòng site khác, nhưng hạ ưu tiên: nó không phải
+thứ làm cho 3 site này chạy được.
+
+### 7.3. Khoảng cách thật đã tìm ra: Plugin C
+
+Plugin C **có** thu cookie (`page.cookies()`) và truyền vào `VideoInfo.cookies`.
+Probe cho thấy trình duyệt **không gửi cookie nào** trên request manifest của site
+đó — mà playback vẫn chạy bình thường.
+
+Hai cách giải thích, chưa phân biệt được:
+
+1. **Cookie là thừa** cho manifest — CDN dùng signed URL. Plugin thu cookie theo
+   kiểu phòng thủ. Nếu đúng, extension cấp đủ và B1 không cần đường cookie.
+2. **Cookie cần cho segment**, không cần cho manifest. Probe **chỉ quan sát
+   request manifest**, không quan sát request `.ts`. Nếu đúng, extension phải thu
+   cookie qua `chrome.cookies` API thay vì dựa vào header quan sát được.
+
+Plugin C cũng thiếu `referer` — nó truyền `referer` nhưng trình duyệt không gửi.
+
+**Đây là giới hạn của probe, không phải của Phương án 2.** Cần một phép đo tiếp
+theo trước khi làm B1: mở rộng bộ lọc sang `.ts` một lần, xem segment có mang
+cookie không. Nửa giờ. Ghi thành **B14**.
+
+### 7.4. Hệ quả
+
+| | |
+|---|---|
+| ADR này | **Proposed → Accepted** |
+| ADR 0006 (tech stack) | **Proposed → Accepted** — WXT đã dựng được probe chạy thật, không còn là lựa chọn trên giấy |
+| B12 | Giữ, hạ ưu tiên (§7.2) |
+| **B14 (mới)** | Đo cookie trên request segment trước khi chốt hợp đồng dữ liệu của B1 (§7.3) |
+
+---
+
+## 8. Consequences
 
 **Tích cực**
 
@@ -580,7 +641,7 @@ Mỗi giai đoạn kết thúc bằng một thứ chạy được. **Giai đoạ
 
 ---
 
-## 8. Cần xác nhận trước khi chốt
+## 9. Cần xác nhận trước khi chốt
 
 1. ~~**Extension có thay thế hoàn toàn headless browser không?**~~ **Đã trả lời
    bởi B9 (§6.3):** bổ sung, và extension chủ động fallback về đường headless khi
@@ -588,10 +649,8 @@ Mỗi giai đoạn kết thúc bằng một thứ chạy được. **Giai đoạ
    — chúng còn là lưới an toàn cho chính extension.
 2. **Giả định về Cốc Cốc (§2.2) chưa được kiểm chứng** từ nguồn chính thức. Nếu
    quyết định nào phụ thuộc vào nó thì cần xác minh trước.
-3. **Chưa đo thực tế**: liệu `chrome.webRequest` có bắt được manifest của cả 3 site
-   không? Cách rẻ nhất để biết: một extension thử nghiệm ~50 dòng chỉ log mọi
-   request khớp `m3u8`, mở 3 trang, xem có ra không. Một buổi tối. **Nên làm trước
-   khi commit vào phương án này.**
+3. ~~**Chưa đo thực tế**: `chrome.webRequest` có bắt được manifest của cả 3 site
+   không?~~ **ĐÃ ĐO — 3/3, xem §7.** Probe nằm ở `apps/extension/`.
 4. **Phân phối:** app local đã đóng gói `.app` được (`build_app.sh`). Extension đi
    kèm thế nào — Chrome Web Store, hay load unpacked cho cá nhân dùng?
 5. **Có áp dụng ý tưởng lai ở §2.5b không** (handshake qua Native Messaging, phần
@@ -607,3 +666,6 @@ Mỗi giai đoạn kết thúc bằng một thứ chạy được. **Giai đoạ
 8. **Tech stack cho extension** — xem [ADR 0006](0006-extension-tech-stack.md).
 9. **ADR 0004 cần cập nhật** sau khi B13 xong: ngoại lệ "trừ SSE stream" trong
    phần Decision không còn đúng nữa.
+10. **B14 (§7.3): request segment có mang cookie không?** Chưa biết. Phải đo trước
+    khi chốt hợp đồng dữ liệu của B1 — nếu segment cần cookie thì extension phải
+    dùng `chrome.cookies` API chứ không dựa được vào header quan sát được.

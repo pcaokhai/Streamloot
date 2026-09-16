@@ -126,7 +126,7 @@ Kiểm tra trước khi commit: `git status` xác nhận không có
 Bài học: **`.gitignore` đúng không đủ.** Phải grep tên miền trên toàn bộ file sắp
 track trước mỗi lần push đầu tiên lên repo công khai.
 
-### A2 — Probe Giai đoạn 0 ⬅️ CÒN LẠI
+### A2 — Probe Giai đoạn 0 ✅ ĐÃ XONG — kết quả 3/3
 
 Extension ~50 dòng, dựng bằng WXT (theo ADR 0006) để không phải code vứt đi —
 nó trở thành bộ khung `background.ts` thật.
@@ -167,12 +167,17 @@ Mở 3 site, ghi lại kết quả:
 Không đổi so với ADR 0005. `.app` đã đóng gói được qua `build_app.sh`. Ký và
 notarize vẫn là việc chưa làm — xem Open Question 3.
 
-## The Assignment
+## The Assignment ✅ HOÀN THÀNH (2026-09-16)
 
-**Tối nay: `git init` xong lịch sử commit, rồi chạy probe 50 dòng trên 3 site và
-ghi con số "bắt được mấy trong 3" vào ADR 0005 §8 item 3.**
+~~Tối nay: `git init` xong lịch sử commit, rồi chạy probe 50 dòng trên 3 site và
+ghi con số "bắt được mấy trong 3" vào ADR 0005 §8 item 3.~~
 
-Không viết thêm dòng tài liệu nào trước khi có con số đó.
+**Cả hai xong trong cùng ngày.** 15 commit đã push; probe cho **3/3**. Cả hai ADR
+chuyển sang **Accepted**. Chi tiết đo ở [ADR 0005 §7](../ADR/0005-stream-capture-architecture.md).
+
+Việc kế tiếp không còn là tài liệu: **B14** — đo xem request segment (`.ts`) có
+mang cookie không, trước khi chốt hợp đồng dữ liệu của B1. Nửa giờ, cùng probe đó,
+chỉ mở rộng bộ lọc.
 
 ## What I noticed about how you think
 

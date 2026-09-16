@@ -2,7 +2,10 @@
 
 ## Status
 
-**Proposed** (2026-09-16) — phụ thuộc ADR 0005 (§8) được chốt trước.
+**Accepted** (2026-09-16) — ADR 0005 đã Accepted sau khi probe cho 3/3.
+
+WXT không còn là lựa chọn trên giấy: probe ở `apps/extension/` đã dựng bằng chính
+stack này và chạy thật. Ba điều học được khi dựng, đã ghi ở §4.3.
 
 > Tài liệu này chỉ bàn *xây extension bằng gì*. *Vì sao* cần extension và nó chịu
 > trách nhiệm phần nào nằm ở [ADR 0005](0005-stream-capture-architecture.md).
@@ -99,7 +102,7 @@ tạp lên, đổi sang React chỉ là sửa hàm `onMount` — WXT không khó
 | Thứ | Lý do |
 |---|---|
 | `webextension-polyfill` | WXT đã chuẩn hóa `browser` |
-| Zustand / Redux | C3 bắt state phải nằm ở `chrome.storage`; store trong RAM là vô nghĩa khi service worker bị thu hồi |
+| Zustand / Redux | C3 bắt state phải nằm ở `browser.storage`; store trong RAM là vô nghĩa khi service worker bị thu hồi |
 | axios / TanStack Query | 4–5 lời gọi `fetch` |
 | shadcn/ui, component lib | Panel 150 dòng. Lib CSS-in-JS còn phải cấu hình portal vào shadow root — thêm việc chứ không bớt |
 
@@ -111,7 +114,7 @@ tạp lên, đổi sang React chỉ là sửa hàm `onMount` — WXT không khó
 apps/extension/
 ├── wxt.config.ts
 ├── entrypoints/
-│   ├── background.ts          # webRequest, gom theo tabId          [B12]
+│   ├── background.ts          # webRequest — ĐÃ CÓ (probe §7 ADR 0005)  [B12]
 │   ├── panel.content/
 │   │   ├── index.ts           # createShadowRootUi, vanilla DOM     [B7][B8]
 │   │   └── style.css
@@ -129,7 +132,7 @@ Python và không bị Python import.
 
 ---
 
-## 4. Hai điểm dễ sai
+## 4. Ba điểm dễ sai
 
 ### 4.1. `lib/types.ts` phải khớp `core/models.py`
 
@@ -148,7 +151,20 @@ Nếu làm B11 (handshake Native Messaging) thì việc này còn bắt buộc h
 `allowed_origins` trong manifest của native host **không chấp nhận wildcard**, phải
 ghi cứng đúng `chrome-extension://<ID>/`.
 
----
+### 4.3. Ba điều học được khi dựng probe (đã kiểm chứng)
+
+Không có trong tài liệu WXT ở chỗ dễ thấy, và cả ba đều làm hỏng build hoặc
+typecheck:
+
+1. **Mọi lời gọi runtime phải nằm trong `defineBackground(() => ...)`.** WXT
+   import file entrypoint lúc build (với `@webext-core/fake-browser`) để đọc
+   config, nên `addListener` ở top-level fail ngay với
+   `Browser.webRequest.onSendHeaders.addListener not implemented`.
+2. **Dùng global `browser`, không dùng `chrome`.** WXT không expose `chrome` cho
+   TypeScript — viết `chrome.*` được `tsc` trả `TS2304: Cannot find name 'chrome'`.
+   Đây chính là §2.3 ("WXT đã chuẩn hóa `browser`") biểu hiện lúc biên dịch.
+3. **Listener `onHeadersReceived` phải `return undefined` tường minh.** Chữ ký là
+   `BlockingResponse | undefined`; `return;` trần cho ra `void` và không khớp.
 
 ## 5. Consequences
 
@@ -177,9 +193,10 @@ ghi cứng đúng `chrome-extension://<ID>/`.
 
 ## 6. Cần xác nhận
 
-1. **Phụ thuộc ADR 0005 §8.** Nếu Phương án 2 không được chốt thì ADR này vô nghĩa.
-2. **Giai đoạn 0 (probe) nên dựng luôn bằng WXT?** Nếu có, probe không phải code
-   vứt đi — nó thành bộ khung `background.ts` của extension thật.
+1. ~~**Phụ thuộc ADR 0005 §8.**~~ **Đã chốt:** ADR 0005 Accepted (3/3).
+2. ~~**Giai đoạn 0 (probe) nên dựng luôn bằng WXT?**~~ **Đã làm.** Probe nằm ở
+   `apps/extension/`, dựng bằng WXT, và `entrypoints/background.ts` của nó chính
+   là bộ khung sẽ dùng tiếp — không có dòng nào phải vứt.
 3. **Chỉ Chrome, hay cả Firefox/Edge?** WXT hỗ trợ đa trình duyệt sẵn, nhưng
    Native Messaging (B11) và đường dẫn manifest khác nhau giữa các trình duyệt.
    Đề xuất: Chrome trước, đừng trả giá đa trình duyệt khi chưa cần.
