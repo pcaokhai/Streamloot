@@ -65,6 +65,12 @@ class TestSourceOnCreate(unittest.TestCase):
             asyncio.run(api_main.start_download(req, MagicMock()))
         self.assertEqual(create.call_args.kwargs["source"], "desktop")
 
+    def test_rejects_off_spec_source(self):
+        from pydantic import ValidationError
+
+        with self.assertRaises(ValidationError):
+            api_main.DownloadRequest(url="https://p.test/v", source="admin")
+
 
 if __name__ == "__main__":
     unittest.main()

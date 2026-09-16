@@ -13,7 +13,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from threading import Lock
-from typing import List, Optional, Dict
+from typing import List, Literal, Optional, Dict
 import asyncio
 from sse_starlette.sse import EventSourceResponse
 
@@ -224,7 +224,7 @@ class DownloadRequest(BaseModel):
     concurrency: int = 4
     output_dir: Optional[str] = None
     format_id: Optional[str] = None
-    source: Optional[str] = None
+    source: Optional[Literal["cli", "desktop", "extension", "unknown"]] = None
 
 
 class VideoInfoPayload(BaseModel):
