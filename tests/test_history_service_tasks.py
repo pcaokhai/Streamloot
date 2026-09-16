@@ -45,5 +45,35 @@ class TestHistoryServiceTasks(unittest.TestCase):
         self.assertEqual(task["status"], "completed")
         self.assertEqual(task["avg_speed"], "5.81MiB/s")
 
+    def test_fail_interrupted_tasks_clears_phantoms(self):
+        """
+        Force-quit giữa chừng để lại hàng 'downloading' — giờ nó là nguồn sự thật
+        cho ba surface, nên menu bar hiện tải ma mãi mãi nếu không dọn.
+        """
+        self.service.create_task("live", "https://example.com/a")
+        self.service.update_task("live", status="downloading", progress=30.0)
+        self.service.create_task("paused", "https://example.com/b")
+        self.service.update_task("paused", status="paused")
+        self.service.create_task("done", "https://example.com/c")
+        self.service.update_task("done", status="completed")
+
+        cleaned = self.service.fail_interrupted_tasks()
+
+        self.assertEqual(cleaned, 2)
+        self.assertEqual(self.service.get_active_tasks(), [])
+        for task_id in ("live", "paused"):
+            task = self.service.get_task(task_id)
+            self.assertEqual(task["status"], "failed")
+            self.assertEqual(task["error_msg"], "Interrupted by app restart")
+        # Bản ghi đã kết thúc không bị đụng vào.
+        self.assertEqual(self.service.get_task("done")["status"], "completed")
+        self.assertIsNone(self.service.get_task("done")["error_msg"])
+
+    def test_fail_interrupted_tasks_is_idempotent(self):
+        self.service.create_task("t", "https://example.com/a")
+        self.assertEqual(self.service.fail_interrupted_tasks(), 1)
+        self.assertEqual(self.service.fail_interrupted_tasks(), 0)
+
+
 if __name__ == '__main__':
     unittest.main()

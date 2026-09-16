@@ -224,6 +224,38 @@ class HistoryService:
             Logger.error(f"Failed to read active tasks: {e}")
             return []
 
+    def fail_interrupted_tasks(self) -> int:
+        """
+        Đánh dấu thất bại mọi task còn dở từ lần chạy trước. Gọi lúc API khởi động.
+
+        Không có tiến trình con nào sống sót qua lần thoát của process sở hữu nó,
+        nên một hàng 'pending'/'downloading'/'paused' còn sót lại là tải ma: menu
+        bar hiện nó mãi mãi, nút Tạm dừng trả 409, không có cách nào xoá. Dọn ở
+        đây chứ không phải trong endpoint — dọn cùng chỗ với phần dọn bản ghi bẩn
+        của download_history.
+
+        Returns: số hàng đã dọn.
+        """
+        placeholders = ",".join("?" for _ in self.TERMINAL_STATUSES)
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "UPDATE download_tasks SET status = 'failed',"
+                    " error_msg = 'Interrupted by app restart',"
+                    " updated_at = CURRENT_TIMESTAMP"
+                    f" WHERE status NOT IN ({placeholders})",
+                    tuple(self.TERMINAL_STATUSES),
+                )
+                conn.commit()
+                if cursor.rowcount:
+                    Logger.warning(
+                        f"Dọn {cursor.rowcount} task dở dang từ lần chạy trước"
+                    )
+                return cursor.rowcount
+        except sqlite3.Error as e:
+            Logger.error(f"Failed to clean up interrupted tasks: {e}")
+            return 0
+
     def get_history(self, limit: int = 50, source: Optional[str] = None) -> list:
         """
         Bản ghi tải gần nhất. `source=None` trả mọi nguồn — cửa sổ app dùng thế

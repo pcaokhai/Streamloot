@@ -168,6 +168,14 @@ history = HistoryService()
 
 
 @app.on_event("startup")
+def _startup_fail_interrupted_tasks():
+    # Không tiến trình con nào sống sót qua lần thoát trước, nên mọi task chưa
+    # kết thúc trong DB là tải ma — ba surface đều đọc get_active_tasks() làm
+    # nguồn sự thật, để nguyên là chúng hiện một download không thể điều khiển.
+    history.fail_interrupted_tasks()
+
+
+@app.on_event("startup")
 def _startup_ytdlp_update_check():
     # Non-blocking: log a warning, never fail startup over this.
     try:
