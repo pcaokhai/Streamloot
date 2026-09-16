@@ -96,6 +96,36 @@ class TestPreparedDownload(unittest.TestCase):
 
         self.assertEqual(save.call_args.kwargs["source"], "extension")
 
+    def test_source_flows_through_playlist_branch(self):
+        """Playlist branch (multiple videos) phải truyền source tới save_record."""
+        from services.download_service import DownloadService
+        from core.models import VideoInfo
+
+        svc = DownloadService()
+        # Build playlist: >1 video with same playlist_name triggers playlist branch
+        vi1 = VideoInfo(
+            title="Video 1",
+            m3u8_url="https://cdn.example.com/v1.m3u8",
+            page_url="https://example.com/watch/1",
+            playlist_name="My Playlist",
+        )
+        vi2 = VideoInfo(
+            title="Video 2",
+            m3u8_url="https://cdn.example.com/v2.m3u8",
+            page_url="https://example.com/watch/2",
+            playlist_name="My Playlist",
+        )
+        with patch.object(svc.downloader, "download", return_value="/tmp/out.mp4"), \
+             patch("services.download_service.sync_archive_with_disk"), \
+             patch("services.download_service.is_video_on_disk", return_value=False), \
+             patch.object(svc.history, "save_record") as save:
+            svc.process_video_infos([vi1, vi2], interactive=False, source="cli")
+
+        # Playlist branch iterates over each video: expect 2 calls, both with source="cli"
+        self.assertEqual(save.call_count, 2)
+        for call in save.call_args_list:
+            self.assertEqual(call.kwargs["source"], "cli")
+
 
 class TestStreamToken(unittest.TestCase):
     """B13 — siết xác thực cho luồng SSE."""
