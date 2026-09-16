@@ -43,24 +43,40 @@ export function useTasks() {
   const hydrate = useCallback(async () => {
     const res = await api.getActiveTasks();
     if (!res) return;
-    for (const t of res.tasks) {
-      setTasks((prev) => ({
-        ...prev,
-        [t.task_id]: {
-          url: t.url,
-          title: t.title,
-          status: t.status,
-          completed: t.progress,
-          speed: t.avg_speed ?? "--",
-          formatId: null,
-          outputPath: t.output_path,
-        },
-      }));
+    // MERGE với state hiện có, không thay hoàn toàn: hydrate() chạy lại mỗi lần
+    // cửa sổ được show (streamloot:refresh), và snapshot REST không mang theo
+    // formatId (client chọn lúc bấm tải, server không lưu/trả lại field này).
+    // Ghi đè toàn bộ như trước sẽ xoá mất formatId của mọi task đang chạy mỗi
+    // lần ẩn/hiện cửa sổ, khiến nút Retry sau đó âm thầm mất lựa chọn chất
+    // lượng — đây là field client sở hữu, phải giữ nguyên qua các lần hydrate.
+    await Promise.all(res.tasks.map(async (t) => {
+      setTasks((prev) => {
+        const existing = prev[t.task_id];
+        return {
+          ...prev,
+          [t.task_id]: {
+            ...existing,
+            formatId: existing?.formatId ?? null,
+            url: t.url,
+            title: t.title,
+            status: t.status,
+            completed: t.progress,
+            speed: t.avg_speed ?? "--",
+            outputPath: t.output_path,
+          },
+        };
+      });
       // Task này có thể do extension hoặc CLI khởi động, nên ta không có token.
       // Xin một cái mới — cơ chế đã có sẵn cho đường khôi phục sau khi mở lại app.
-      const tok = await api.refreshStreamToken(t.task_id);
-      if (tok?.stream_token) attachStream(t.task_id, tok.stream_token);
-    }
+      try {
+        const tok = await api.refreshStreamToken(t.task_id);
+        if (tok?.stream_token) attachStream(t.task_id, tok.stream_token);
+      } catch {
+        // 404 (task biến mất) hay 409 (đã ở trạng thái cuối) giữa lúc lấy
+        // snapshot và lúc xin token — snapshot vừa set ở trên đã đủ chính xác,
+        // không cần stream nữa.
+      }
+    }));
   }, [attachStream]);
 
   useEffect(() => {
