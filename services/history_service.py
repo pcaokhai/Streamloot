@@ -37,6 +37,7 @@ class HistoryService:
                         status TEXT NOT NULL,
                         output_path TEXT,
                         playlist_name TEXT,
+                        source TEXT DEFAULT 'unknown',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
@@ -45,6 +46,16 @@ class HistoryService:
                     cursor.execute("ALTER TABLE download_history ADD COLUMN playlist_name TEXT")
                 except sqlite3.OperationalError:
                     pass
+
+                # Migrate CSDL cũ: thêm cột source nếu chưa có. Không backfill —
+                # không có cách nào biết ngược nguồn của bản ghi đã tồn tại.
+                for table in ("download_history", "download_tasks"):
+                    try:
+                        cursor.execute(
+                            f"ALTER TABLE {table} ADD COLUMN source TEXT DEFAULT 'unknown'"
+                        )
+                    except sqlite3.OperationalError:
+                        pass
 
                 # In-flight API task tracking (task_id, status, progress). Separate
                 # table from download_history: this tracks the lifecycle of a
@@ -60,6 +71,7 @@ class HistoryService:
                         output_path TEXT,
                         error_msg TEXT,
                         avg_speed TEXT,
+                        source TEXT DEFAULT 'unknown',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
@@ -103,7 +115,9 @@ class HistoryService:
         except sqlite3.Error as e:
             Logger.error(f"Failed to initialize history database: {e}")
             
-    def save_record(self, title: str, url: str, m3u8_url: str, format_id: Optional[str], status: str, output_path: Optional[str], playlist_name: Optional[str] = None):
+    def save_record(self, title: str, url: str, m3u8_url: str, format_id: Optional[str],
+                    status: str, output_path: Optional[str], playlist_name: Optional[str] = None,
+                    source: str = "unknown"):
         """
         Saves a clean download record to the SQLite database.
         """
@@ -124,22 +138,22 @@ class HistoryService:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT INTO download_history 
-                    (title, url, m3u8_url, format_id, status, output_path, playlist_name, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (clean_title, url, m3u8_url, clean_format, status, clean_path, playlist_name, datetime.now()))
+                    INSERT INTO download_history
+                    (title, url, m3u8_url, format_id, status, output_path, playlist_name, source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (clean_title, url, m3u8_url, clean_format, status, clean_path, playlist_name, source, datetime.now()))
                 conn.commit()
                 Logger.get_logger().debug(f"Download history saved: {status}")
         except sqlite3.Error as e:
             Logger.error(f"Failed to save history record: {e}")
 
-    def create_task(self, task_id: str, url: str) -> None:
+    def create_task(self, task_id: str, url: str, source: str = "unknown") -> None:
         """Registers a new API download task in 'pending' state."""
         try:
             with self._get_connection() as conn:
                 conn.execute(
-                    "INSERT INTO download_tasks (task_id, url, status) VALUES (?, ?, 'pending')",
-                    (task_id, url),
+                    "INSERT INTO download_tasks (task_id, url, status, source) VALUES (?, ?, 'pending', ?)",
+                    (task_id, url, source),
                 )
                 conn.commit()
         except sqlite3.Error as e:
