@@ -26,3 +26,5 @@ docs/**/*.private.md
 /build/
 /dist/
 /packaging/vendor/
+packaging/extension-key/private.pem
+packaging/extension-key/public.der

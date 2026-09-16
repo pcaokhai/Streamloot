@@ -3,13 +3,14 @@
  * hồi service worker bất kỳ lúc nào (ADR 0006 C3).
  */
 export interface Settings {
-  apiKey: string;
   port: number;
   concurrency: number;
 }
 
 export const DEFAULTS: Settings = {
-  apiKey: '',
+  // Không có apiKey: backend tin extension này qua header `Origin` khớp ID đã
+  // ghim trong manifest. Trình duyệt luôn tự đặt Origin và JS của trang không
+  // ghi đè được, nên trang web độc hại không mạo danh được extension.
   // Trùng DESKTOP_PORT ở apps/desktop/main.py.
   port: 8001,
   // B10 — yt-dlp đã nhận -N từ trước (ADR 0005 §6.2.3), chỉ thiếu chỗ chỉnh.

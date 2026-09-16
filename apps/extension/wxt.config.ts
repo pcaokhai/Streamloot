@@ -3,6 +3,12 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   manifest: {
     name: 'Streamloot',
+
+    // Public key ghim => extension ID cố định qua mọi lần load unpacked.
+    // Backend tin đúng ID này, nên KHÔNG cần người dùng dán API key (ADR 0006
+    // §4.2). Keypair ở packaging/extension-key/ — private.pem gitignored.
+    // Public key nằm trong manifest của mọi extension đã publish, công khai là bình thường.
+    key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2mH7KefgqfsP3l+ZOgg3uGjB1k9H8m5yn7yJgv9qI12sSRhs38PA9xbrkeFp4M7+3f0BfcwpgJOP+EMy0ZIfnddnrS73NUH3Shj5MqLHbcldJ8NoA+/zwoMQsMf1FuPcjOWkqU81YpNFeAK3XxDovqOAjCYE5e+rWY6Z9e8ZXYu1JvqtIRU254JmiJ3FugyqBo8CHURjsmsi1zp0yD+lfNisRacl3WlQJaDBS2drRbo/kzGZ3+MwBD5a3RXShJ23n+wMMf1SWB3h4H3R5765d9uZGLINLiV5t0QW5iFPHZHJP5H3CDCKiNlQW0/EqQ1nrsEXzoOiu9ZSKXCVo0+XFwIDAQAB',
     description:
       'Bắt stream trong phiên duyệt web của bạn rồi bàn giao cho app Streamloot trên máy tải. Không gửi dữ liệu ra ngoài máy.',
 

@@ -17,7 +17,7 @@ npm run build        # hoặc `npm run dev` để có HMR
 Trong Chrome: `chrome://extensions` → Developer mode → **Load unpacked** →
 `apps/extension/.output/chrome-mv3`.
 
-Rồi bấm icon → **Cài đặt** → dán API key mà app hiện ra (menu bar ⤓ → Backend).
+Xong. **Không phải cấu hình gì** — không có API key để dán.
 
 ## Nó làm gì
 
@@ -26,7 +26,7 @@ Rồi bấm icon → **Cài đặt** → dán API key mà app hiện ra (menu ba
 | Service worker | Quan sát `webRequest`, gom manifest **theo tab**, đặt badge số lượng |
 | Panel (content script) | Tự nổi lên khi bắt được, cho chọn chất lượng, tải, hiện tiến trình |
 | Popup | Trạng thái kết nối backend — phân biệt *chưa cấu hình* / *không kết nối được* / *đã kết nối* |
-| Options | API key, cổng, số kết nối song song |
+| Options | Cổng, số kết nối song song |
 
 ## Bốn quyết định không hiển nhiên
 
@@ -40,6 +40,16 @@ hẳn tên miền trang, và 2/3 site đích phục vụ stream qua iframe riên
 **Không xin quyền `cookies`.** Phép đo B14 cho thấy mọi host phục vụ byte media
 đều không nhận cookie, nên quyền đó là thừa.
 
+**Không dùng API key.** Backend nhận diện extension qua header `Origin` khớp một
+ID đã ghim cứng. Trình duyệt **luôn tự đặt** `Origin` và JS của trang **không ghi
+đè được**, nên trang web độc hại không mạo danh được — đúng mô hình đe dọa mà
+ADR 0004 nêu. ID cố định nhờ pin `key` trong manifest.
+
+Nói thẳng chỗ yếu hơn: một tiến trình local (`curl`) giả được `Origin`. Nhưng
+tiến trình local cũng đọc được API key từ môi trường của app, nên khoản đó vốn đã
+không bảo vệ nổi trường hợp này. Không phải đổi an toàn lấy tiện lợi — chỉ là bỏ
+một bước copy-paste không mua thêm gì.
+
 **Dùng `fetch` + `ReadableStream` cho tiến trình, không dùng `EventSource`.**
 MV3 service worker không có `EventSource`. Đổi lại được thứ tốt hơn: `fetch` set
 được header `Authorization`, nên không cần token dùng-một-lần và nối lại stream
@@ -47,7 +57,9 @@ bao nhiêu lần cũng được.
 
 ## Panel không hiện?
 
-1. Popup có báo *Đã kết nối* không? Không thì lỗi nằm ở app/API key, không phải panel.
+1. Popup có báo *Đã kết nối* không? Không thì lỗi nằm ở app, không phải panel.
+   Nếu báo *App từ chối extension này* thì build đã mất `key` trong manifest và ID
+   không còn khớp.
 2. Badge trên icon có số không? Không có nghĩa là chưa bắt được manifest nào —
    trang có thể không dùng HLS/DASH (YouTube video thường là ví dụ: media đi qua
    `googlevideo.com/videoplayback` + range request, không có manifest file).

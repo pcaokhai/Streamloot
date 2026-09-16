@@ -20,9 +20,10 @@
     <h1>Streamloot</h1>
     <div class="sub">Extension nói chuyện với app Streamloot chạy trên máy bạn. Không có dữ liệu nào rời khỏi máy.</div>
 
-    <label for="apiKey">API key</label>
-    <input id="apiKey" type="password" autocomplete="off" />
-    <div class="hint">App sinh key mới mỗi lần khởi động. Lấy ở menu bar ⤓ → Backend.</div>
+    <div class="hint" style="margin-top:0">
+      Không cần API key. App nhận diện extension này qua ID cố định của nó, nên
+      không có gì phải sao chép.
+    </div>
 
     <label for="port">Cổng</label>
     <input id="port" type="number" min="1" max="65535" />

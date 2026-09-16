@@ -103,7 +103,7 @@ class TestStreamToken(unittest.TestCase):
 
     def test_stream_endpoint_rejects_bad_token(self):
         with self.assertRaises(HTTPException) as ctx:
-            run(api_main.stream_progress("task-4", token="nope", authorization=None))
+            run(api_main.stream_progress("task-4", token="nope", authorization=None, origin=None))
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_stream_accepts_bearer_header(self):
@@ -113,7 +113,7 @@ class TestStreamToken(unittest.TestCase):
         không nhận được tiến trình.
         """
         res = run(api_main.stream_progress(
-            "task-5", token=None, authorization=f"Bearer {os.environ['API_KEY']}"
+            "task-5", token=None, authorization=f"Bearer {os.environ['API_KEY']}", origin=None
         ))
         self.assertIsNotNone(res)
 
@@ -121,13 +121,13 @@ class TestStreamToken(unittest.TestCase):
         """Client fetch nối lại stream nhiều lần được; token vẫn nguyên cho client khác."""
         token = api_main.issue_stream_token("task-6")
         run(api_main.stream_progress(
-            "task-6", token=None, authorization=f"Bearer {os.environ['API_KEY']}"
+            "task-6", token=None, authorization=f"Bearer {os.environ['API_KEY']}", origin=None
         ))
         self.assertTrue(api_main.consume_stream_token("task-6", token))
 
     def test_stream_rejects_wrong_bearer(self):
         with self.assertRaises(HTTPException) as ctx:
-            run(api_main.stream_progress("task-7", token=None, authorization="Bearer wrong"))
+            run(api_main.stream_progress("task-7", token=None, authorization="Bearer wrong", origin=None))
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_refresh_rejects_unknown_task(self):
@@ -147,6 +147,63 @@ class TestStreamToken(unittest.TestCase):
         with patch.object(api_main.history, "get_task", return_value={"status": "downloading"}):
             out = api_main.refresh_stream_token("live")
         self.assertTrue(api_main.consume_stream_token("live", out["stream_token"]))
+
+
+class TestOriginAuth(unittest.TestCase):
+    """
+    Xác thực qua `Origin` cho extension — bỏ được bước dán API key.
+
+    An toàn với đúng mô hình đe dọa của ADR 0004 (trang web độc hại gọi ngầm tới
+    localhost): trình duyệt LUÔN tự đặt Origin và JS của trang không ghi đè được.
+    """
+
+    OFFICIAL = f"chrome-extension://{api_main.OFFICIAL_EXTENSION_ID}"
+
+    def test_official_extension_origin_is_accepted(self):
+        self.assertEqual(api_main.verify_client(credentials=None, origin=self.OFFICIAL), "extension")
+
+    def test_valid_api_key_still_accepted(self):
+        from fastapi.security import HTTPAuthorizationCredentials
+
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=os.environ["API_KEY"])
+        self.assertEqual(api_main.verify_client(credentials=creds, origin=None), "api-key")
+
+    def test_web_page_origin_is_rejected(self):
+        """Đây là đe dọa chính: một trang web bất kỳ gọi ngầm tới localhost."""
+        with self.assertRaises(HTTPException) as ctx:
+            api_main.verify_client(credentials=None, origin="https://evil.example.com")
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_other_extension_origin_is_rejected(self):
+        with self.assertRaises(HTTPException) as ctx:
+            api_main.verify_client(credentials=None, origin="chrome-extension://someotherextension")
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_no_credentials_at_all_is_rejected(self):
+        with self.assertRaises(HTTPException) as ctx:
+            api_main.verify_client(credentials=None, origin=None)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_wrong_api_key_rejected(self):
+        from fastapi.security import HTTPAuthorizationCredentials
+
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="wrong")
+        with self.assertRaises(HTTPException) as ctx:
+            api_main.verify_client(credentials=creds, origin=None)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_stream_accepts_official_origin(self):
+        res = run(api_main.stream_progress(
+            "task-origin", token=None, authorization=None, origin=self.OFFICIAL
+        ))
+        self.assertIsNotNone(res)
+
+    def test_stream_rejects_web_origin(self):
+        with self.assertRaises(HTTPException) as ctx:
+            run(api_main.stream_progress(
+                "task-evil", token=None, authorization=None, origin="https://evil.example.com"
+            ))
+        self.assertEqual(ctx.exception.status_code, 401)
 
 
 class TestExtensionCors(unittest.TestCase):

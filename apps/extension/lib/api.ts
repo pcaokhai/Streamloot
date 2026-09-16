@@ -8,9 +8,13 @@ async function baseUrl(): Promise<string> {
   return `http://127.0.0.1:${port}/api/v1`;
 }
 
-async function authHeaders(): Promise<Record<string, string>> {
-  const { apiKey } = await loadSettings();
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` };
+/**
+ * Không gửi API key. Backend nhận diện extension qua header `Origin`, mà Chrome
+ * tự đặt là `chrome-extension://<id>` và JS không ghi đè được — xem verify_client
+ * ở apps/api/main.py.
+ */
+function jsonHeaders(): Record<string, string> {
+  return { 'Content-Type': 'application/json' };
 }
 
 export class BackendError extends Error {
@@ -24,7 +28,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   try {
     res = await fetch(`${await baseUrl()}${path}`, {
       method: 'POST',
-      headers: await authHeaders(),
+      headers: jsonHeaders(),
       body: JSON.stringify(body),
     });
   } catch {
@@ -33,7 +37,9 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     throw new BackendError('Không kết nối được Streamloot. App đã chạy chưa?');
   }
   if (res.status === 401 || res.status === 403) {
-    throw new BackendError('API key sai. Mở Options để nhập lại.', res.status);
+    // Origin không khớp: gần như chắc chắn là extension đang chạy với ID khác ID
+    // đã ghim — xảy ra khi build mất `key` trong manifest.
+    throw new BackendError('App từ chối extension này. ID có khớp không?', res.status);
   }
   if (!res.ok) {
     throw new BackendError(`Backend trả ${res.status}`, res.status);
@@ -43,7 +49,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 
 export async function ping(): Promise<boolean> {
   try {
-    const res = await fetch(`${await baseUrl()}/history`, { headers: await authHeaders() });
+    const res = await fetch(`${await baseUrl()}/history`, { headers: jsonHeaders() });
     return res.ok;
   } catch {
     return false;
@@ -81,9 +87,9 @@ export function startDownloadByUrl(url: string, formatId: string | null): Promis
  * Đọc tiến trình.
  *
  * Dùng `fetch` + `ReadableStream` chứ KHÔNG dùng `EventSource`: MV3 service
- * worker không có `EventSource`. Đổi lại được một thứ tốt hơn — `fetch` set
- * được header `Authorization`, nên không cần token dùng-một-lần và nối lại
- * stream bao nhiêu lần cũng được (ADR 0005 §6.3.1).
+ * worker không có `EventSource`. Đổi lại được thứ tốt hơn — với `fetch`, Chrome
+ * gửi kèm `Origin`, nên backend nhận diện được extension và ta không cần token
+ * dùng-một-lần; nối lại stream bao nhiêu lần cũng được (ADR 0005 §6.3.1).
  */
 export async function streamProgress(
   taskId: string,
@@ -91,7 +97,7 @@ export async function streamProgress(
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch(`${await baseUrl()}/downloads/${taskId}/stream`, {
-    headers: await authHeaders(),
+    headers: jsonHeaders(),
     signal,
   });
   if (!res.ok || !res.body) throw new BackendError(`Stream trả ${res.status}`, res.status);

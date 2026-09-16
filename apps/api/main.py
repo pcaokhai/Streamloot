@@ -43,11 +43,18 @@ _allowed_origins = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").spl
 # extension nào người dùng cài cũng gọi được backend này. Phải ghi cứng đúng ID.
 # Muốn ID cố định giữa các lần load unpacked thì pin `key` trong manifest
 # (ADR 0006 §4.2).
+# ID của extension chính thức, suy ra từ public key ghim trong manifest của nó
+# (packaging/extension-key/). Ghim cứng nên không cần người dùng cấu hình gì —
+# đó là toàn bộ lý do bỏ được bước dán API key.
+OFFICIAL_EXTENSION_ID = "mafcgkfdagbgihegabddjhmobieiipdd"
+
 _extension_ids = [i.strip() for i in os.getenv("STREAMLOOT_EXTENSION_IDS", "").split(",") if i.strip()]
-_allowed_origins += [
+_extension_ids.append(OFFICIAL_EXTENSION_ID)
+_extension_origins = [
     i if i.startswith("chrome-extension://") else f"chrome-extension://{i}"
     for i in _extension_ids
 ]
+_allowed_origins += _extension_origins
 
 security = HTTPBearer()
 
@@ -81,10 +88,43 @@ def consume_stream_token(task_id: str, token: Optional[str]) -> bool:
         del _stream_tokens[task_id]
         return True
 
-def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
-    if credentials.credentials != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing API Key")
-    return credentials.credentials
+security_optional = HTTPBearer(auto_error=False)
+
+
+def verify_client(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security_optional),
+    origin: Optional[str] = Header(default=None),
+):
+    """
+    Nhận HAI cách xác thực. Cả hai đều nhắm đúng mô hình đe dọa của ADR 0004:
+    một trang web độc hại gọi ngầm tới localhost.
+
+    1. `Authorization: Bearer <API_KEY>` — cho desktop UI và mọi client ngoài
+       trình duyệt.
+    2. `Origin` khớp CHÍNH XÁC một extension đã ghim — cho browser extension.
+
+    Vì sao (2) an toàn với đúng đe dọa đó: trình duyệt LUÔN tự đặt `Origin` và
+    JS của trang không ghi đè được. Trang web độc hại gửi kèm origin của chính
+    nó, không khớp allowlist, nên bị chặn. Extension khác cũng vậy — ID được
+    ghim cứng, không dùng wildcard.
+
+    Yếu hơn ở đâu, nói thẳng: một tiến trình local (curl) giả được `Origin`.
+    Nhưng tiến trình local cũng đọc được API_KEY từ môi trường của app, nên
+    khoản (1) vốn đã không bảo vệ nổi trường hợp đó. Không phải đổi an toàn lấy
+    tiện lợi — chỉ là bỏ một bước copy-paste không mua thêm gì.
+
+    CORSMiddleware KHÔNG thay thế được hàm này: nó chỉ bỏ header CORS khiến
+    trình duyệt không đọc được response, còn request thì đã thực thi xong rồi.
+    """
+    if credentials is not None and secrets.compare_digest(credentials.credentials, API_KEY):
+        return "api-key"
+    if origin and origin in _extension_origins:
+        return "extension"
+    raise HTTPException(status_code=401, detail="Invalid or missing credentials")
+
+
+# Giữ tên cũ: mọi endpoint đang tham chiếu nó.
+verify_api_key = verify_client
 
 # NOTE: single-worker deployment only. Task state (running subprocess handles,
 # SSE queues) lives in this process's memory; running uvicorn with --workers > 1
@@ -439,6 +479,7 @@ async def stream_progress(
     task_id: str,
     token: Optional[str] = None,
     authorization: Optional[str] = Header(default=None),
+    origin: Optional[str] = Header(default=None),
 ):
     """
     Nhận HAI cách xác thực, vì hai loại client có khả năng khác nhau:
@@ -452,8 +493,12 @@ async def stream_progress(
     Header được ưu tiên: nó không tiêu thụ token, nên client fetch nối lại
     stream bao nhiêu lần cũng được.
     """
-    if authorization and authorization.removeprefix("Bearer ").strip() == API_KEY:
+    if authorization and secrets.compare_digest(
+        authorization.removeprefix("Bearer ").strip(), API_KEY
+    ):
         pass
+    elif origin and origin in _extension_origins:
+        pass  # extension: cùng cơ chế như mọi endpoint khác (xem verify_client)
     elif not consume_stream_token(task_id, token):
         raise HTTPException(status_code=401, detail="Invalid or missing stream credentials")
     q = registry.get_queue(task_id)

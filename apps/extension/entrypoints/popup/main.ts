@@ -9,14 +9,11 @@ async function render() {
   const status = document.getElementById('status')!;
   const hint = document.getElementById('hint')!;
   const caps = document.getElementById('caps')!;
-  const { apiKey, port } = await loadSettings();
+  const { port } = await loadSettings();
 
-  // B6 — phân biệt ba trạng thái. "Không kết nối được" mà không nói vì sao thì
-  // người dùng không biết phải sửa gì.
-  if (!apiKey) {
-    status.innerHTML = '<span class="dot off"></span>Chưa cấu hình';
-    hint.textContent = 'Chưa có API key. Mở Cài đặt và dán key mà app hiện ra.';
-  } else if (await api.ping()) {
+  // B6 — nói rõ vì sao không kết nối được. Người dùng sửa "app chưa chạy" và
+  // "app từ chối" theo hai cách hoàn toàn khác nhau.
+  if (await api.ping()) {
     status.innerHTML = '<span class="dot on"></span>Đã kết nối';
     hint.textContent = `Backend 127.0.0.1:${port}`;
   } else {
