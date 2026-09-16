@@ -6,12 +6,19 @@ Build via ./build_app.sh — it builds the React UI and vendors yt-dlp/ffmpeg
 into packaging/vendor/bin first, both of which this spec expects to exist.
 """
 import os
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 ROOT = Path(SPECPATH).parent
 VENDOR_BIN = ROOT / "packaging" / "vendor" / "bin"
+
+# BẮT BUỘC: PyInstaller eval spec với sys.path KHÔNG chứa repo root, nên
+# collect_submodules("plugins") sẽ trả [] một cách im lặng và app build ra thiếu
+# hẳn DrissionPage — plugin import lỗi lúc chạy, factory nuốt exception, người
+# dùng chỉ thấy "Couldn't load formats". Thêm ROOT vào trước mọi lời gọi collect_*.
+sys.path.insert(0, str(ROOT))
 
 # --- data -----------------------------------------------------------------
 datas = [
@@ -46,6 +53,17 @@ hiddenimports += collect_submodules("webview")
 # statusbar được import qua đường namespace package (apps.desktop.statusbar);
 # thêm tường minh để phân tích tĩnh của PyInstaller không bỏ sót.
 hiddenimports += ["apps.desktop.statusbar", "AppKit", "Foundation", "objc"]
+
+# Fail ồn ào thay vì ship một app suy giảm âm thầm.
+if (ROOT / "plugins").is_dir():
+    _found = [m for m in hiddenimports if m.startswith("plugins.")]
+    if not _found:
+        raise SystemExit(
+            "BUILD ABORT: plugins/ tồn tại nhưng collect_submodules('plugins') không "
+            "tìm thấy module nào. App build ra sẽ thiếu DrissionPage và mọi private "
+            "extractor sẽ fail im lặng lúc chạy. Kiểm tra sys.path trong spec."
+        )
+    print(f"[spec] thu được {len(_found)} plugin module: {_found}")
 
 
 a = Analysis(

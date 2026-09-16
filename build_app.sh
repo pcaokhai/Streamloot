@@ -124,6 +124,19 @@ check() {
 }
 check "apps/desktop/ui/dist/index.html"
 check "bin/yt-dlp"
+
+# Plugin là file .py dạng data, nhưng thư viện chúng import phải nằm trong PYZ.
+# Thiếu DrissionPage thì mọi private extractor ném ImportError lúc chạy, factory
+# nuốt exception theo đúng thiết kế, và người dùng chỉ thấy "Couldn't load
+# formats" — suy giảm hoàn toàn im lặng. Kiểm ở đây để nó không im lặng nữa.
+if [[ -d "$ROOT_DIR/plugins" ]]; then
+    if grep -q "DrissionPage" "$ROOT_DIR/build/Streamloot/PYZ-00.toc" 2>/dev/null; then
+        echo "    ok   DrissionPage (trong PYZ)"
+    else
+        echo "    MISS DrissionPage — private extractor sẽ fail im lặng lúc chạy" >&2
+        FAILED=1
+    fi
+fi
 [[ "$WITH_FFMPEG" == true ]] && check "bin/ffmpeg"
 [[ -d "$ROOT_DIR/plugins" ]] && check "plugins"
 
