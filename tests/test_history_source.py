@@ -126,6 +126,47 @@ class TestActiveAndFilter(unittest.TestCase):
                                  status="SUCCESS", output_path="/tmp/f", source=src)
         self.assertEqual(len(self.svc.get_history()), 3)
 
+    def test_active_tasks_ordered_newest_first(self):
+        """Verify get_active_tasks returns tasks ordered by created_at DESC (newest first).
+
+        Must explicitly set created_at to avoid wall-clock timing flakiness.
+        This test ensures the ORDER BY clause is not accidentally removed or reversed.
+        """
+        with self._get_connection() as conn:
+            # Insert tasks with explicit created_at timestamps (microsecond precision to avoid ties)
+            conn.execute(
+                "INSERT INTO download_tasks (task_id, url, status, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                ("older", "u1", "downloading", "2026-01-01 10:00:00.000000")
+            )
+            conn.execute(
+                "INSERT INTO download_tasks (task_id, url, status, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                ("middle", "u2", "downloading", "2026-01-01 10:00:01.000000")
+            )
+            conn.execute(
+                "INSERT INTO download_tasks (task_id, url, status, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                ("newest", "u3", "downloading", "2026-01-01 10:00:02.000000")
+            )
+            conn.commit()
+
+        tasks = self.svc.get_active_tasks()
+        task_ids = [t["task_id"] for t in tasks]
+        # Newest first (DESC order)
+        self.assertEqual(task_ids, ["newest", "middle", "older"])
+
+    def test_history_with_nonexistent_source_returns_empty(self):
+        """get_history(source="bogus") should return [] for a source that matches no rows."""
+        self.svc.save_record(title="t", url="u", m3u8_url="m", format_id="best",
+                             status="SUCCESS", output_path="/tmp/f", source="extension")
+        result = self.svc.get_history(source="bogus")
+        self.assertEqual(result, [])
+
+    def _get_connection(self):
+        """Helper to get a direct database connection for explicit timestamp insertion."""
+        return sqlite3.connect(self.tmp.name)
+
 
 if __name__ == "__main__":
     unittest.main()
