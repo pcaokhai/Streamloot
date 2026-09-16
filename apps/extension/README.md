@@ -17,6 +17,11 @@ npm run build        # hoặc `npm run dev` để có HMR
 Trong Chrome: `chrome://extensions` → Developer mode → **Load unpacked** →
 `apps/extension/.output/chrome-mv3`.
 
+> **Nếu bạn từng nạp extension này trước khi manifest có `key`:** phải **Remove**
+> rồi **Load unpacked** lại. Bấm *Reload* là không đủ — Chromium giữ nguyên ID
+> cũ (vốn sinh từ đường dẫn thư mục) và chỉ nạp lại code, nên ID vẫn không khớp
+> ID mà app tin. Triệu chứng: popup báo *"App từ chối extension này"*.
+
 Xong. **Không phải cấu hình gì** — không có API key để dán.
 
 ## Nó làm gì
@@ -64,8 +69,10 @@ bao nhiêu lần cũng được.
 ## Panel không hiện?
 
 1. Popup có báo *Đã kết nối* không? Không thì lỗi nằm ở app, không phải panel.
-   Nếu báo *App từ chối extension này* thì build đã mất `key` trong manifest và ID
-   không còn khớp.
+   Nếu báo *App từ chối extension này*: app đang chạy nhưng ID không khớp. Xem
+   log của app (`~/Library/Application Support/Streamloot/logs/`) — nó ghi rõ
+   origin nhận được và origin được chấp nhận. Thường là do cần **Remove rồi Load
+   unpacked lại** thay vì chỉ Reload.
 2. Badge trên icon có số không? Không có nghĩa là chưa bắt được manifest nào —
    trang có thể không dùng HLS/DASH (YouTube video thường là ví dụ: media đi qua
    `googlevideo.com/videoplayback` + range request, không có manifest file).

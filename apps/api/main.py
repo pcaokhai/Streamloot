@@ -120,6 +120,12 @@ def verify_client(
         return "api-key"
     if origin and origin in _extension_origins:
         return "extension"
+    # Một 401 không để lại dấu vết là không chẩn được: người dùng chỉ thấy "app
+    # từ chối" mà không ai biết origin nào bị từ chối và đang mong đợi origin nào.
+    Logger.error(
+        f"Từ chối client. Origin nhận được: {origin!r}. "
+        f"Origin được chấp nhận: {_extension_origins}"
+    )
     raise HTTPException(status_code=401, detail="Invalid or missing credentials")
 
 
