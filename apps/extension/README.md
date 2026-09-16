@@ -72,9 +72,19 @@ manifest. Cookie đó cần cho segment, hay là thừa?
 | **Có `cookie`** | Cookie cần cho segment. Extension **phải** dùng `chrome.cookies` API — header quan sát được là không đủ |
 | "chưa bắt được" | Chưa thấy segment nào. Bấm play và để chạy vài giây |
 
-Segment được nhận diện theo **host** (bất kỳ request nào tới host đã phục vụ
-manifest), không theo đuôi file — vì có site ngụy trang segment MPEG-TS thành PNG.
-Chỉ lấy 3 mẫu mỗi host: một video là hàng trăm segment.
+Cột Segment liệt kê **từng host kèm resource type**, không gộp — gộp lại sẽ che
+mất host nào mang cookie.
+
+**Hai cách nhận diện segment đầu tiên đều trượt**, ghi lại để khỏi thử lại:
+
+| Cách | Vì sao trượt |
+|---|---|
+| Theo đuôi `.ts` | Có site ngụy trang segment MPEG-TS thành PNG — lọc `.ts` trượt đúng site cần đo nhất |
+| Theo host của manifest | Segment nằm ở **host khác hẳn** manifest. Đo thật cho thấy manifest một nơi, byte một nơi |
+
+Cách đang dùng: **resource type do chính Chrome gán** (`media`,
+`xmlhttprequest`, `other`, `image`). `image` có trong danh sách chính vì segment
+ngụy trang PNG sẽ bị phân loại là ảnh. Lấy 2 mẫu mỗi cặp host+type.
 
 ### Thiếu cookie chưa chắc là vấn đề
 

@@ -52,11 +52,18 @@ async function render() {
       const man = hs.filter((h) => h.kind === 'manifest');
       const seg = hs.filter((h) => h.kind === 'segment');
       const cdns = [...new Set(man.map((h) => h.host))].join(', ');
-      const segLabel = seg.length ? `${ctxOf(seg)} <span class="n">(n=${seg.length})</span>` : '<span class="none">chưa bắt được</span>';
+
+      // Liệt kê TỪNG host segment: gộp lại sẽ che mất host nào mang cookie.
+      const byHost = new Map<string, Hit[]>();
+      for (const h of seg) byHost.set(`${h.host} (${h.rtype})`, [...(byHost.get(`${h.host} (${h.rtype})`) ?? []), h]);
+      const segLabel = byHost.size
+        ? [...byHost].map(([k, hs2]) => `<div class="seg"><span class="host">${esc(k)}</span> → ${ctxOf(hs2)}</div>`).join('')
+        : '<span class="none">chưa bắt được</span>';
+
       return `<tr><td class="host" title="${esc(page)}">${esc(page)}</td><td class="host" title="${esc(cdns)}">${esc(cdns)}</td><td>${ctxOf(man)}</td><td>${segLabel}</td></tr>`;
     }).join('') +
     '</table>' +
-    '<div class="sub" style="margin-top:8px">B14: cột <b>Segment</b> trả lời câu hỏi cookie. Có <b>cookie</b> ở segment mà không có ở manifest → extension phải dùng <code>chrome.cookies</code>, không dựa được vào header quan sát.</div>';
+    '<div class="sub" style="margin-top:8px">B14: cột <b>Segment</b> trả lời câu hỏi cookie. Có <b>cookie</b> ở host phục vụ byte mà không có ở manifest → extension phải dùng <code>chrome.cookies</code>, không dựa được vào header quan sát.</div>';
 }
 
 document.getElementById('clear')!.addEventListener('click', async () => {

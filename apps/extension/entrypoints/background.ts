@@ -22,6 +22,8 @@ export interface Hit {
   page: string;
   /** Host của chính manifest; thường là CDN riêng, khác tên miền trang. */
   host: string;
+  /** Resource type do Chrome gán — cho biết segment đến dưới dạng gì. */
+  rtype: string;
   url: string;
   via: 'url' | 'content-type';
   at: number;
@@ -29,16 +31,15 @@ export interface Hit {
   ctx: { cookie: boolean; referer: boolean; userAgent: boolean; origin: boolean };
 }
 
-// B14 — segment. KHÔNG nhận diện theo đuôi file là chính, vì có site ngụy trang
-// segment MPEG-TS thành PNG (xem cờ clean_disguised_ts của Plugin C). Đường chắc
-// hơn: bất kỳ request nào tới host đã từng phục vụ manifest.
-const SEGMENT_URL = /\.(ts|m4s|mp4|aac|m4a)(\?|$)/i;
+// B14 — segment. Hai lần đoán đầu đều trượt, nên thôi đoán:
+//  - Theo đuôi .ts: trượt, vì có site ngụy trang segment MPEG-TS thành PNG.
+//  - Theo host của manifest: trượt, vì segment nằm ở host khác hẳn manifest.
+// Dùng resource type do chính Chrome gán. 'image' có trong danh sách vì segment
+// ngụy trang PNG sẽ được phân loại là ảnh.
+const BYTE_TYPES = new Set(['media', 'xmlhttprequest', 'other', 'image']);
 const manifestHosts = new Set<string>();
 const segCount = new Map<string, number>();
-const SEG_SAMPLES = 3; // đủ trả lời "có cookie không", không làm ngập storage
-
-const isSegment = (url: string, host: string) =>
-  !MANIFEST_URL.test(url) && (manifestHosts.has(host) || SEGMENT_URL.test(url));
+const SEG_SAMPLES = 2; // mỗi cặp host+type, đủ trả lời "có cookie không"
 
 // d.initiator là origin của trang khởi tạo request. Thiếu nó thì popup chỉ hiện
 // hostname CDN, và người đo phải tự nhớ CDN nào thuộc site nào.
@@ -85,11 +86,12 @@ export default defineBackground(() => {
       let kind: Hit['kind'];
       if (via) {
         kind = 'manifest';
-      } else if (isSegment(d.url, host)) {
-        // Chỉ lấy vài mẫu mỗi host: một video là hàng trăm segment.
-        const n = segCount.get(host) ?? 0;
+      } else if (BYTE_TYPES.has(d.type)) {
+        // Lấy vài mẫu mỗi cặp host+type: một video là hàng trăm segment.
+        const key = `${host}|${d.type}`;
+        const n = segCount.get(key) ?? 0;
         if (n >= SEG_SAMPLES) return;
-        segCount.set(host, n + 1);
+        segCount.set(key, n + 1);
         kind = 'segment';
       } else {
         return;
@@ -100,6 +102,7 @@ export default defineBackground(() => {
         kind,
         page: pageOf(d),
         host,
+        rtype: d.type,
         url: d.url,
         via: via ?? 'url',
         at: Date.now(),
@@ -122,6 +125,7 @@ export default defineBackground(() => {
         kind: 'manifest',
         page: pageOf(d),
         host: new URL(d.url).hostname,
+        rtype: d.type,
         url: d.url,
         via,
         at: Date.now(),
