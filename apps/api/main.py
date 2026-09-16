@@ -514,11 +514,13 @@ async def stream_progress(
     x_streamloot_extension_id: Optional[str] = Header(default=None),
 ):
     """
-    Nhận HAI cách xác thực, vì hai loại client có khả năng khác nhau:
+    Nhận BA cách xác thực, vì các loại client có khả năng khác nhau:
 
     - `Authorization: Bearer <API_KEY>` — cho client gọi bằng `fetch`. MV3
       service worker KHÔNG có `EventSource`, nên extension buộc phải dùng
       `fetch` + `ReadableStream`, và `fetch` thì set được header bình thường.
+    - `X-Streamloot-Extension-Id` — extension, cùng cơ chế như mọi endpoint
+      khác (xem `verify_client`).
     - `?token=` dùng-một-lần — cho client dùng `EventSource` (desktop UI), vì
       `EventSource` không set được header.
 
@@ -532,6 +534,15 @@ async def stream_progress(
     elif x_streamloot_extension_id and x_streamloot_extension_id in _extension_ids:
         pass  # extension: cùng cơ chế như mọi endpoint khác (xem verify_client)
     elif not consume_stream_token(task_id, token):
+        # Ghi lại manh mối trước khi từ chối: một lần 401 không dấu vết ở đúng
+        # đường này từng tốn ba vòng gỡ lỗi mới tìm ra nguyên nhân là
+        # `Origin: None`. Không log secret, chỉ log có/không và origin nhận được.
+        Logger.error(
+            f"Từ chối stream task {task_id}: "
+            f"Bearer={'có' if authorization else 'không'}, "
+            f"ext-id={x_streamloot_extension_id!r}, "
+            f"token={'có' if token else 'không'}, Origin={origin!r}"
+        )
         raise HTTPException(status_code=401, detail="Invalid or missing stream credentials")
     q = registry.get_queue(task_id)
 
