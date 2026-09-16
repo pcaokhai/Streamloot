@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Streamloot — Cài đặt</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font: 14px/1.6 -apple-system, system-ui, sans-serif; margin: 0; padding: 28px; max-width: 540px; }
+      h1 { font-size: 17px; margin: 0 0 4px; }
+      .sub { opacity: .65; font-size: 13px; margin-bottom: 20px; }
+      label { display: block; margin-top: 16px; font-weight: 600; font-size: 13px; }
+      input { width: 100%; box-sizing: border-box; font: inherit; padding: 7px 9px; margin-top: 5px; border-radius: 7px; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: transparent; color: inherit; }
+      .hint { font-size: 12px; opacity: .65; margin-top: 4px; line-height: 1.5; }
+      button { font: inherit; font-weight: 600; padding: 7px 16px; margin-top: 20px; border-radius: 7px; border: 0; background: #2563eb; color: #fff; cursor: pointer; }
+      #saved { margin-left: 10px; font-size: 13px; color: #22c55e; opacity: 0; transition: opacity .2s; }
+      #saved.show { opacity: 1; }
+    </style>
+  </head>
+  <body>
+    <h1>Streamloot</h1>
+    <div class="sub">Extension nói chuyện với app Streamloot chạy trên máy bạn. Không có dữ liệu nào rời khỏi máy.</div>
+
+    <label for="apiKey">API key</label>
+    <input id="apiKey" type="password" autocomplete="off" />
+    <div class="hint">App sinh key mới mỗi lần khởi động. Lấy ở menu bar ⤓ → Backend.</div>
+
+    <label for="port">Cổng</label>
+    <input id="port" type="number" min="1" max="65535" />
+    <div class="hint">Mặc định 8001, trùng với app.</div>
+
+    <label for="concurrency">Số kết nối song song</label>
+    <input id="concurrency" type="number" min="1" max="16" />
+    <div class="hint">Số mảnh tải cùng lúc (yt-dlp <code>-N</code>). Cao hơn thì nhanh hơn nhưng dễ bị site chặn.</div>
+
+    <div><button id="save">Lưu</button><span id="saved">Đã lưu</span></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

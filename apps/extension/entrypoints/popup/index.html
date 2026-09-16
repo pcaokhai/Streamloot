@@ -2,33 +2,27 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Streamloot Probe</title>
+    <title>Streamloot</title>
     <style>
       :root { color-scheme: light dark; }
-      body { font: 13px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 12px; min-width: 620px; }
-      h1 { font-size: 13px; margin: 0 0 2px; }
-      .sub { opacity: .6; font-size: 11px; margin-bottom: 10px; }
-      .score { font-size: 22px; font-weight: 600; margin: 8px 0; }
-      table { border-collapse: collapse; width: 100%; font-size: 12px; }
-      th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
-      th { font-weight: 600; opacity: .6; font-size: 11px; }
-      td.host { font-family: ui-monospace, monospace; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .empty { opacity: .75; padding: 12px 0; line-height: 1.55; }
-      .empty b { opacity: 1; }
-      .none { opacity: .45; font-style: italic; }
-      .n { opacity: .5; }
-      .seg { font-size: 11px; padding: 1px 0; }
-      .seg .host { display: inline; font-family: ui-monospace, monospace; opacity: .75; }
-      code { font-family: ui-monospace, monospace; font-size: 11px; background: color-mix(in srgb, currentColor 10%, transparent); padding: 1px 4px; border-radius: 3px; }
-      button { margin-top: 10px; font: inherit; padding: 4px 10px; }
+      body { font: 13px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 14px; min-width: 300px; }
+      h1 { font-size: 13px; margin: 0 0 10px; }
+      .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+      .on { background: #22c55e; } .off { background: #ef4444; } .wait { background: #a1a1aa; }
+      .row { display: flex; align-items: center; margin: 8px 0; }
+      .hint { font-size: 11px; opacity: .65; line-height: 1.5; margin-top: 6px; }
+      table { border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 10px; }
+      td { padding: 3px 0; border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
+      td.h { font-family: ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
+      button { font: inherit; padding: 4px 10px; margin-top: 10px; }
     </style>
   </head>
   <body>
-    <h1>Streamloot Probe</h1>
-    <div class="sub">ADR 0005 · Giai đoạn 0 — chỉ quan sát, không tải gì</div>
-    <div class="score" id="score">—</div>
-    <div id="out"></div>
-    <button id="clear">Xoá kết quả</button>
+    <h1>Streamloot</h1>
+    <div class="row" id="status"><span class="dot wait"></span>Đang kiểm tra…</div>
+    <div id="hint" class="hint"></div>
+    <div id="caps"></div>
+    <button id="opts">Cài đặt</button>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

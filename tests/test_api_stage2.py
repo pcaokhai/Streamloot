@@ -103,7 +103,31 @@ class TestStreamToken(unittest.TestCase):
 
     def test_stream_endpoint_rejects_bad_token(self):
         with self.assertRaises(HTTPException) as ctx:
-            run(api_main.stream_progress("task-4", token="nope"))
+            run(api_main.stream_progress("task-4", token="nope", authorization=None))
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_stream_accepts_bearer_header(self):
+        """
+        MV3 service worker không có EventSource, nên extension buộc dùng fetch —
+        và fetch set được header. Đường này phải hoạt động, nếu không extension
+        không nhận được tiến trình.
+        """
+        res = run(api_main.stream_progress(
+            "task-5", token=None, authorization=f"Bearer {os.environ['API_KEY']}"
+        ))
+        self.assertIsNotNone(res)
+
+    def test_bearer_header_does_not_consume_the_token(self):
+        """Client fetch nối lại stream nhiều lần được; token vẫn nguyên cho client khác."""
+        token = api_main.issue_stream_token("task-6")
+        run(api_main.stream_progress(
+            "task-6", token=None, authorization=f"Bearer {os.environ['API_KEY']}"
+        ))
+        self.assertTrue(api_main.consume_stream_token("task-6", token))
+
+    def test_stream_rejects_wrong_bearer(self):
+        with self.assertRaises(HTTPException) as ctx:
+            run(api_main.stream_progress("task-7", token=None, authorization="Bearer wrong"))
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_refresh_rejects_unknown_task(self):

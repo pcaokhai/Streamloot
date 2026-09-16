@@ -1,135 +1,104 @@
-// ADR 0005 §6.7 Giai đoạn 0 — probe đo một thứ duy nhất:
-// webRequest có quan sát được manifest stream trên các site đích không?
-//
-// Chỉ QUAN SÁT. Không tải, không gọi backend, không gửi gì ra ngoài.
-// Kết quả nằm trong browser.storage.local, xem qua popup.
-//
-// Hai điều đã kiểm chứng trước khi viết (ADR 0005 §1.2, §6.3 B7):
-//  - MV3 chỉ bỏ webRequest *blocking*; listener quan sát còn nguyên.
-//  - KHÔNG đọc <video>.src — trang stream đưa blob URL qua MSE, vô dụng.
+/**
+ * Service worker — quan sát network, gom manifest theo tab, phục vụ panel.
+ *
+ * Tiến hoá từ probe Giai đoạn 0 (không có dòng nào phải vứt). Bốn điều dưới đây
+ * đã kiểm chứng bằng đo thật, xem docs/impl/2026-09-16-stage0-probe-log.md:
+ *
+ *  - MV3 chỉ bỏ webRequest *blocking*; listener quan sát còn nguyên.
+ *  - KHÔNG bao giờ đọc `<video>.src` — trang stream đưa blob URL qua MSE, vô
+ *    dụng và không kèm header nào (B7).
+ *  - Manifest nằm ở CDN khác hẳn tên miền trang, 2/3 site đi qua iframe — nên
+ *    gom theo tabId chứ không gom theo host.
+ *  - Bắt theo cả đuôi URL lẫn Content-Type (B12).
+ */
+import type { Capture } from '../lib/types';
 
 const MANIFEST_URL = /\.(m3u8|mpd)(\?|$)/i;
 const MANIFEST_TYPE = /(mpegurl|dash\+xml)/i;
 
-// B12: URL manifest thường có query string hoặc không đuôi, nên bắt cả hai đường.
-const detect = (url: string, contentType?: string) =>
-  MANIFEST_URL.test(url) ? 'url' : contentType && MANIFEST_TYPE.test(contentType) ? 'content-type' : null;
+const keyFor = (tabId: number) => `captures:${tabId}`;
 
-export interface Hit {
-  /** B14: manifest hay segment. Câu hỏi cookie chỉ trả lời được ở segment. */
-  kind: 'manifest' | 'segment';
-  /** Trang đã khởi tạo request — câu hỏi "mấy trong 3 site" hỏi về cái này. */
-  page: string;
-  /** Host của chính manifest; thường là CDN riêng, khác tên miền trang. */
-  host: string;
-  /** Resource type do Chrome gán — cho biết segment đến dưới dạng gì. */
-  rtype: string;
-  url: string;
-  via: 'url' | 'content-type';
-  at: number;
-  /** Ngữ cảnh phiên mà bước 3 của IDM cần bàn giao cho downloader (ADR 0005 §2.1). */
-  ctx: { cookie: boolean; referer: boolean; userAgent: boolean; origin: boolean };
+/** Trần mỗi tab: một trang có thể nạp nhiều biến thể playlist. */
+const MAX_PER_TAB = 12;
+
+async function getCaptures(tabId: number): Promise<Capture[]> {
+  const k = keyFor(tabId);
+  const stored = await browser.storage.session.get(k);
+  return (stored as Record<string, Capture[]>)[k] ?? [];
 }
 
-// B14 — segment. Hai lần đoán đầu đều trượt, nên thôi đoán:
-//  - Theo đuôi .ts: trượt, vì có site ngụy trang segment MPEG-TS thành PNG.
-//  - Theo host của manifest: trượt, vì segment nằm ở host khác hẳn manifest.
-// Dùng resource type do chính Chrome gán. 'image' có trong danh sách vì segment
-// ngụy trang PNG sẽ được phân loại là ảnh.
-const BYTE_TYPES = new Set(['media', 'xmlhttprequest', 'other', 'image']);
-const manifestHosts = new Set<string>();
-const segCount = new Map<string, number>();
-const SEG_SAMPLES = 2; // mỗi cặp host+type, đủ trả lời "có cookie không"
+async function addCapture(tabId: number, cap: Capture): Promise<void> {
+  const existing = await getCaptures(tabId);
+  if (existing.some((c) => c.url === cap.url)) return; // playlist bị fetch lại nhiều lần
+  const next = [...existing, cap].slice(-MAX_PER_TAB);
+  await browser.storage.session.set({ [keyFor(tabId)]: next });
 
-// d.initiator là origin của trang khởi tạo request. Thiếu nó thì popup chỉ hiện
-// hostname CDN, và người đo phải tự nhớ CDN nào thuộc site nào.
-const pageOf = (d: { initiator?: string; documentUrl?: string }) => {
+  // B8 — badge cho biết ngay trang này bắt được mấy stream, không bắt người dùng
+  // đi tìm. Đây là khác biệt giữa "công cụ tôi phải nhớ là mình có" và "công cụ
+  // luôn ở đó" (R5 trong ADR 0005).
+  await browser.action.setBadgeText({ tabId, text: String(next.length) }).catch(() => {});
+  await browser.action.setBadgeBackgroundColor({ tabId, color: '#2563eb' }).catch(() => {});
+
+  // Báo content script để panel tự nổi lên.
+  browser.tabs.sendMessage(tabId, { type: 'captures', captures: next }).catch(() => {
+    // Content script chưa nạp trên trang này — bỏ qua, nó sẽ tự hỏi lúc nạp.
+  });
+}
+
+async function clearTab(tabId: number): Promise<void> {
+  await browser.storage.session.remove(keyFor(tabId));
+  await browser.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+}
+
+/** Origin của frame khởi tạo request — 2/3 site đích phục vụ stream qua iframe. */
+function pageOf(d: { initiator?: string; documentUrl?: string }): string {
   const raw = d.initiator ?? d.documentUrl;
   try {
-    return raw ? new URL(raw).hostname : '(không rõ)';
+    return raw ? new URL(raw).hostname : '';
   } catch {
-    return '(không rõ)';
+    return '';
   }
-};
-
-// Một số 0 phải đọc được: nếu không đếm tổng request thì "0 manifest" vừa có thể
-// nghĩa là listener chưa chạy, vừa có thể nghĩa là site không có manifest nào.
-// Đếm trong RAM rồi flush theo lô — storage.session nằm trong bộ nhớ (không chạm
-// đĩa) và sống qua các lần service worker bị thu hồi.
-let seen = 0;
-async function bumpSeen() {
-  if (++seen % 20 !== 0) return; // mất tối đa 19 lần đếm nếu SW chết — không ảnh hưởng câu hỏi "có > 0 không"
-  const { seenTotal = 0 } = (await browser.storage.session.get('seenTotal')) as { seenTotal?: number };
-  await browser.storage.session.set({ seenTotal: seenTotal + 20 });
 }
 
-// C3 (ADR 0006): MV3 thu hồi service worker bất kỳ lúc nào, nên state phải nằm ở
-// storage. Giữ trong biến module là mất sạch kết quả probe giữa chừng.
-async function record(hit: Hit) {
-  if (hit.kind === 'manifest') manifestHosts.add(hit.host);
-  const { hits = [] } = (await browser.storage.local.get('hits')) as { hits?: Hit[] };
-  if (hits.some((h) => h.url === hit.url)) return; // playlist được fetch lại nhiều lần
-  await browser.storage.local.set({ hits: [...hits, hit].slice(-200) });
-  console.log(`[probe] ${hit.host} via ${hit.via}`, hit.url, hit.ctx);
-}
-
-// Mọi lời gọi runtime PHẢI nằm trong main(): WXT import file này lúc build (với
-// một fake browser) để đọc config, nên addListener ở top-level sẽ làm hỏng build.
 export default defineBackground(() => {
-  // Request headers: cần 'extraHeaders' mới thấy Cookie/Referer (Chrome lọc mặc định).
+  // Mọi lời gọi runtime phải nằm trong đây: WXT import file này lúc build với
+  // một fake browser để đọc config, nên addListener ở top-level làm hỏng build.
+
+  // Cần 'extraHeaders' mới thấy Referer — Chrome lọc header này khỏi listener
+  // theo mặc định.
   browser.webRequest.onSendHeaders.addListener(
     (d) => {
-      void bumpSeen();
-      const host = new URL(d.url).hostname;
-      const via = detect(d.url);
-
-      let kind: Hit['kind'];
-      if (via) {
-        kind = 'manifest';
-      } else if (BYTE_TYPES.has(d.type)) {
-        // Lấy vài mẫu mỗi cặp host+type: một video là hàng trăm segment.
-        const key = `${host}|${d.type}`;
-        const n = segCount.get(key) ?? 0;
-        if (n >= SEG_SAMPLES) return;
-        segCount.set(key, n + 1);
-        kind = 'segment';
-      } else {
-        return;
-      }
-
-      const has = (n: string) => !!d.requestHeaders?.some((h) => h.name.toLowerCase() === n);
-      void record({
-        kind,
+      if (d.tabId < 0 || !MANIFEST_URL.test(d.url)) return;
+      const header = (n: string) =>
+        d.requestHeaders?.find((h) => h.name.toLowerCase() === n)?.value;
+      void addCapture(d.tabId, {
         page: pageOf(d),
-        host,
-        rtype: d.type,
+        host: new URL(d.url).hostname,
         url: d.url,
-        via: via ?? 'url',
+        title: '',
+        referer: header('referer'),
+        origin: header('origin'),
+        userAgent: header('user-agent'),
         at: Date.now(),
-        ctx: { cookie: has('cookie'), referer: has('referer'), userAgent: has('user-agent'), origin: has('origin') },
       });
     },
     { urls: ['<all_urls>'] },
     ['requestHeaders', 'extraHeaders'],
   );
 
-  // Response headers: đường thứ hai, bắt manifest mà URL không lộ đuôi file.
+  // Đường thứ hai (B12): manifest mà URL không lộ đuôi file. Đo thật trên 3 site
+  // đích thì đường này chưa từng khớp, nhưng giữ vì rẻ và phòng site khác.
   browser.webRequest.onHeadersReceived.addListener(
-    // Trả undefined tường minh: chữ ký của onHeadersReceived là
-    // BlockingResponse | undefined, nên `return;` trần cho ra void và không khớp.
     (d): undefined => {
+      if (d.tabId < 0 || MANIFEST_URL.test(d.url)) return undefined;
       const ct = d.responseHeaders?.find((h) => h.name.toLowerCase() === 'content-type')?.value;
-      const via = detect(d.url, ct);
-      if (via !== 'content-type') return undefined; // đường URL đã do listener trên lo
-      void record({
-        kind: 'manifest',
+      if (!ct || !MANIFEST_TYPE.test(ct)) return undefined;
+      void addCapture(d.tabId, {
         page: pageOf(d),
         host: new URL(d.url).hostname,
-        rtype: d.type,
         url: d.url,
-        via,
+        title: '',
         at: Date.now(),
-        ctx: { cookie: false, referer: false, userAgent: false, origin: false },
       });
       return undefined;
     },
@@ -137,11 +106,21 @@ export default defineBackground(() => {
     ['responseHeaders'],
   );
 
-  // MV3 thu hồi service worker liên tục; seed lại danh sách host manifest từ
-  // storage, nếu không thì sau mỗi lần thu hồi sẽ mất khả năng nhận diện segment.
-  void browser.storage.local.get('hits').then(({ hits = [] }) => {
-    for (const h of hits as Hit[]) if (h.kind === 'manifest') manifestHosts.add(h.host);
+  // Điều hướng sang trang khác thì kết quả cũ không còn đúng.
+  browser.tabs.onUpdated.addListener((tabId, info) => {
+    if (info.status === 'loading' && info.url) void clearTab(tabId);
   });
+  browser.tabs.onRemoved.addListener((tabId) => void clearTab(tabId));
 
-  console.log('[probe] armed — mở site cần đo, rồi bấm icon extension để xem kết quả');
+  browser.runtime.onMessage.addListener((msg, sender) => {
+    const m = msg as { type?: string; tabId?: number };
+    if (m?.type === 'getCaptures') {
+      const tabId = m.tabId ?? sender.tab?.id;
+      return tabId === undefined ? Promise.resolve([]) : getCaptures(tabId);
+    }
+    if (m?.type === 'clearCaptures' && m.tabId !== undefined) {
+      return clearTab(m.tabId).then(() => true);
+    }
+    return undefined;
+  });
 });

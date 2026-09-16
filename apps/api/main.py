@@ -8,7 +8,7 @@ import threading
 import uuid
 import json
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Security
+from fastapi import FastAPI, Depends, Header, HTTPException, BackgroundTasks, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -435,11 +435,27 @@ def refresh_stream_token(task_id: str):
 
 
 @app.get("/api/v1/downloads/{task_id}/stream")
-async def stream_progress(task_id: str, token: Optional[str] = None):
-    # Không dùng Depends(verify_api_key) được: EventSource không gửi header.
-    # Token dùng-một-lần do endpoint tạo task phát ra (B13).
-    if not consume_stream_token(task_id, token):
-        raise HTTPException(status_code=401, detail="Invalid or missing stream token")
+async def stream_progress(
+    task_id: str,
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+):
+    """
+    Nhận HAI cách xác thực, vì hai loại client có khả năng khác nhau:
+
+    - `Authorization: Bearer <API_KEY>` — cho client gọi bằng `fetch`. MV3
+      service worker KHÔNG có `EventSource`, nên extension buộc phải dùng
+      `fetch` + `ReadableStream`, và `fetch` thì set được header bình thường.
+    - `?token=` dùng-một-lần — cho client dùng `EventSource` (desktop UI), vì
+      `EventSource` không set được header.
+
+    Header được ưu tiên: nó không tiêu thụ token, nên client fetch nối lại
+    stream bao nhiêu lần cũng được.
+    """
+    if authorization and authorization.removeprefix("Bearer ").strip() == API_KEY:
+        pass
+    elif not consume_stream_token(task_id, token):
+        raise HTTPException(status_code=401, detail="Invalid or missing stream credentials")
     q = registry.get_queue(task_id)
 
     async def event_generator():
@@ -499,6 +515,25 @@ def get_formats(url: str):
         return {"title": video_info.title, "formats": formats}
     except HTTPException:
         raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Timed out listing formats.")
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/v1/formats/prepared", dependencies=[Depends(verify_api_key)])
+def get_formats_prepared(payload: VideoInfoPayload):
+    """
+    Liệt kê format từ VideoInfo client dựng sẵn — không extract lại.
+
+    Đối xứng với /downloads/prepared. Cần cho panel của extension: nó phải hiện
+    danh sách chất lượng TRƯỚC khi người dùng bấm tải (ADR 0005 §2.5d), mà
+    /api/v1/formats thì lại tự extract từ URL, tức mở Chromium lần nữa — đúng
+    cái ~30s mà cả Phương án 2 sinh ra để tránh.
+    """
+    try:
+        formats = YtDlpDownloader().list_formats(payload.to_video_info())
+        return {"title": payload.title, "formats": formats}
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Timed out listing formats.")
     except (ValueError, RuntimeError) as e:

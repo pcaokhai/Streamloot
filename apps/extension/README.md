@@ -1,29 +1,66 @@
-# Streamloot Extension — Giai đoạn 0 (probe)
+# Streamloot Extension
 
-Hiện tại thư mục này **chỉ chứa probe** của [ADR 0005 §6.7 Giai đoạn 0](../../docs/ADR/0005-stream-capture-architecture.md),
-chưa phải extension thật.
+Bắt stream trong phiên duyệt web thật của bạn rồi bàn giao cho app Streamloot
+trên máy tải. Kiến trúc và lý do: [ADR 0005](../../docs/ADR/0005-stream-capture-architecture.md),
+stack: [ADR 0006](../../docs/ADR/0006-extension-tech-stack.md).
 
-Probe đo đúng một thứ: **`webRequest` có quan sát được manifest stream trên các
-site đích không?** Câu trả lời quyết định ADR 0005 có đứng vững hay phải viết lại.
-
-Nó **chỉ quan sát**. Không tải, không gọi backend, không gửi gì ra ngoài máy.
+**Không có dữ liệu nào rời khỏi máy.** Extension chỉ gọi `127.0.0.1`.
 
 ## Chạy
 
 ```bash
 cd apps/extension
 npm install
-npm run build
+npm run build        # hoặc `npm run dev` để có HMR
 ```
 
-Rồi trong Chrome:
+Trong Chrome: `chrome://extensions` → Developer mode → **Load unpacked** →
+`apps/extension/.output/chrome-mv3`.
 
-1. `chrome://extensions` → bật **Developer mode**
-2. **Load unpacked** → chọn `apps/extension/.output/chrome-mv3`
-3. Mở site cần đo, bấm play
-4. Bấm icon extension → popup hiện kết quả
+Rồi bấm icon → **Cài đặt** → dán API key mà app hiện ra (menu bar ⤓ → Backend).
 
-Muốn sửa code và xem ngay thì `npm run dev` (WXT tự reload).
+## Nó làm gì
+
+| Phần | Việc |
+|---|---|
+| Service worker | Quan sát `webRequest`, gom manifest **theo tab**, đặt badge số lượng |
+| Panel (content script) | Tự nổi lên khi bắt được, cho chọn chất lượng, tải, hiện tiến trình |
+| Popup | Trạng thái kết nối backend — phân biệt *chưa cấu hình* / *không kết nối được* / *đã kết nối* |
+| Options | API key, cổng, số kết nối song song |
+
+## Bốn quyết định không hiển nhiên
+
+**Không bao giờ đọc `<video>.src` (B7).** Trang stream đưa cho `<video>` một blob
+URL qua Media Source Extensions: không tải được, không kèm header. Nguồn duy nhất
+đáng tin là những gì service worker quan sát từ network.
+
+**Gom theo `tabId`, không theo host.** Đo thật cho thấy manifest nằm ở CDN khác
+hẳn tên miền trang, và 2/3 site đích phục vụ stream qua iframe riêng.
+
+**Không xin quyền `cookies`.** Phép đo B14 cho thấy mọi host phục vụ byte media
+đều không nhận cookie, nên quyền đó là thừa.
+
+**Dùng `fetch` + `ReadableStream` cho tiến trình, không dùng `EventSource`.**
+MV3 service worker không có `EventSource`. Đổi lại được thứ tốt hơn: `fetch` set
+được header `Authorization`, nên không cần token dùng-một-lần và nối lại stream
+bao nhiêu lần cũng được.
+
+## Panel không hiện?
+
+1. Popup có báo *Đã kết nối* không? Không thì lỗi nằm ở app/API key, không phải panel.
+2. Badge trên icon có số không? Không có nghĩa là chưa bắt được manifest nào —
+   trang có thể không dùng HLS/DASH (YouTube video thường là ví dụ: media đi qua
+   `googlevideo.com/videoplayback` + range request, không có manifest file).
+3. Đã bấm play chưa? Manifest chỉ được fetch khi player khởi động.
+
+---
+
+# Phụ lục — probe Giai đoạn 0
+
+Extension này tiến hoá từ probe đo `webRequest` (ADR 0005 §6.7 Giai đoạn 0);
+`background.ts` của probe chính là bộ khung hiện tại, không có dòng nào bị vứt.
+Nhật ký 5 lần chạy, gồm ba lần đoán sai và vì sao:
+[`docs/impl/2026-09-16-stage0-probe-log.md`](../../docs/impl/2026-09-16-stage0-probe-log.md).
 
 ## Đọc kết quả
 
