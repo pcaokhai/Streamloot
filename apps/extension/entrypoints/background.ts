@@ -31,7 +31,7 @@ const keyFor = (tabId: number) => `captures:${tabId}`;
  */
 let lastKnownTasks: TaskRecord[] = [];
 
-export function setLastKnownTasks(tasks: TaskRecord[]): void {
+function setLastKnownTasks(tasks: TaskRecord[]): void {
   lastKnownTasks = tasks;
 }
 
@@ -214,12 +214,6 @@ export default defineBackground(() => {
       viewers = Math.max(0, viewers - 1);
       return Promise.resolve({ ok: true });
     }
-    if (m?.type === 'getTasks') {
-      return refreshTasks().then((tasks) =>
-        tasks === null ? { ok: false as const, tasks: lastKnownTasks } : { ok: true as const, tasks },
-      );
-    }
-
     return undefined;
   });
 
@@ -263,8 +257,12 @@ export default defineBackground(() => {
     // Hợp đồng của nextPollMs chỉ trả 1000 | 60000 | null — so bằng đúng giá trị
     // ngắn thay vì ngưỡng lỏng (<= 5000) để không âm thầm chấp nhận giá trị lạ.
     if (ms === 1000) {
-      void browser.alarms.clear(ALARM);
+      // KHÔNG clear alarm ở đây. MV3 giết service worker sau 5 phút bất kể có
+      // đang hoạt động hay không — setTimeout chết theo worker, giữ nguyên
+      // alarm 60s làm lưới đỡ: worker hồi sinh, tick() lại chạy. Bắn trùng vô
+      // hại vì tick() tự chặn bằng tickSeq.
       timer = setTimeout(() => void tick(), ms);
+      void browser.alarms.create(ALARM, { periodInMinutes: 1 });
     } else {
       void browser.alarms.create(ALARM, { periodInMinutes: ms / 60000 });
     }
