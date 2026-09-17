@@ -205,6 +205,44 @@ class HistoryService:
         except sqlite3.Error as e:
             Logger.error(f"Failed to update task record: {e}")
 
+    #: Trạng thái do NGƯỜI DÙNG đặt. Một dòng tiến trình không được phép kéo
+    #: task ra khỏi những trạng thái này.
+    USER_INTENT_STATUSES = ("paused", "cancelling")
+
+    def update_progress(self, task_id: str, progress: float,
+                        avg_speed: Optional[str] = None) -> None:
+        """
+        Ghi tiến trình mà KHÔNG giẫm lên ý định của người dùng.
+
+        Trước đây mỗi dòng tiến trình đều ghi thẳng status='downloading'. Bấm
+        tạm dừng xong, chỉ cần một dòng còn nằm trong bộ đệm stdout được đọc ra
+        là status bị lật ngược về 'downloading' — menu hiện lại "Tạm dừng" và
+        nhìn như nút không ăn. Cùng cơ chế đó nuốt luôn 'cancelling', nên bản
+        ghi kết thúc thành 'failed' thay vì 'cancelled'.
+
+        CASE nằm trong SQL để phép so sánh và phép ghi là một thao tác nguyên tử:
+        đọc-rồi-ghi ở Python sẽ có khe hở đúng bằng lúc người dùng bấm nút.
+        """
+        placeholders = ",".join("?" for _ in self.USER_INTENT_STATUSES)
+        sets = ["updated_at = ?", "progress = ?"]
+        values = [datetime.now(), progress]
+        if avg_speed is not None:
+            sets.append("avg_speed = ?")
+            values.append(avg_speed)
+        sets.append(
+            f"status = CASE WHEN status IN ({placeholders}) THEN status ELSE 'downloading' END"
+        )
+        values.extend(self.USER_INTENT_STATUSES)
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    f"UPDATE download_tasks SET {', '.join(sets)} WHERE task_id = ?",
+                    values + [task_id],
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            Logger.error(f"Failed to update task progress: {e}")
+
     def get_task(self, task_id: str) -> Optional[dict]:
         """Returns the current state of a task, or None if it doesn't exist."""
         try:

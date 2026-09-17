@@ -305,7 +305,10 @@ def run_download_task(task_id: str, req: DownloadRequest):
             # line, before postprocessing) get overwritten by this one
             # since it always fires last.
             avg_speed = data.get("speed") if data.get("status") == "completed" else None
-            history.update_task(task_id, status="downloading", progress=data["completed"], avg_speed=avg_speed)
+            # update_progress, KHÔNG phải update_task: một dòng tiến trình không
+            # được phép kéo task ra khỏi trạng thái người dùng vừa đặt (paused,
+            # cancelling). Xem HistoryService.update_progress.
+            history.update_progress(task_id, data["completed"], avg_speed=avg_speed)
 
     def process_callback(process: subprocess.Popen):
         registry.set_process(task_id, process)
@@ -350,7 +353,10 @@ def run_prepared_task(task_id: str, req: PreparedDownloadRequest):
         registry.broadcast_sync(task_id, data)
         if "completed" in data:
             avg_speed = data.get("speed") if data.get("status") == "completed" else None
-            history.update_task(task_id, status="downloading", progress=data["completed"], avg_speed=avg_speed)
+            # update_progress, KHÔNG phải update_task: một dòng tiến trình không
+            # được phép kéo task ra khỏi trạng thái người dùng vừa đặt (paused,
+            # cancelling). Xem HistoryService.update_progress.
+            history.update_progress(task_id, data["completed"], avg_speed=avg_speed)
 
     def process_callback(process: subprocess.Popen):
         registry.set_process(task_id, process)

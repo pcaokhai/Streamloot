@@ -80,16 +80,36 @@ else
 fi
 
 if [[ "$WITH_FFMPEG" == true && ! -x "$VENDOR_BIN/ffmpeg" ]]; then
-    echo "    fetching ffmpeg (static build from evermeet.cx)..."
+    # ffmpeg phải CÙNG KIẾN TRÚC với máy đang chạy.
+    #
+    # evermeet.cx (nguồn cũ) chỉ phát hành bản x86_64. Nhét bản đó vào một app
+    # arm64 thì nó vẫn chạy qua Rosetta, nhưng macOS bắn thông báo "Support
+    # Ending for Intel-based Apps" cho người dùng, và Rosetta sẽ biến mất ở một
+    # bản macOS nào đó. Chọn nguồn theo `uname -m`.
+    HOST_ARCH="$(uname -m)"
+    case "$HOST_ARCH" in
+        arm64)  FFMPEG_ASSET="ffmpeg-darwin-arm64" ;;
+        x86_64) FFMPEG_ASSET="ffmpeg-darwin-x64" ;;
+        *)      FFMPEG_ASSET="" ;;
+    esac
+    echo "    fetching ffmpeg ($HOST_ARCH static build)..."
     # yt-dlp needs ffmpeg to merge separate video/audio streams, which is the
     # common case -- without it downloads silently come out video-only.
-    TMP_ZIP="$(mktemp -t ffmpeg).zip"
-    if curl -fsSL --retry 3 "https://evermeet.cx/ffmpeg/getrelease/zip" -o "$TMP_ZIP"; then
-        unzip -qo "$TMP_ZIP" -d "$VENDOR_BIN"
+    if [[ -n "$FFMPEG_ASSET" ]] && curl -fsSL --retry 3 \
+        "https://github.com/eugeneware/ffmpeg-static/releases/latest/download/$FFMPEG_ASSET" \
+        -o "$VENDOR_BIN/ffmpeg"; then
         chmod +x "$VENDOR_BIN/ffmpeg"
-        rm -f "$TMP_ZIP"
+        # Kiểm lại thay vì tin: tải nhầm kiến trúc là lỗi thầm lặng, app vẫn
+        # chạy được nên không ai phát hiện cho tới khi macOS cảnh báo.
+        GOT_ARCH="$(lipo -archs "$VENDOR_BIN/ffmpeg" 2>/dev/null || echo unknown)"
+        if [[ "$GOT_ARCH" != *"$HOST_ARCH"* ]]; then
+            echo "    ERROR: ffmpeg tải về là '$GOT_ARCH', máy này là '$HOST_ARCH'." >&2
+            rm -f "$VENDOR_BIN/ffmpeg"
+            exit 1
+        fi
+        echo "    ffmpeg OK ($GOT_ARCH)"
     else
-        rm -f "$TMP_ZIP"
+        rm -f "$VENDOR_BIN/ffmpeg"
         echo "    WARNING: ffmpeg download failed. The app will fall back to" >&2
         echo "             /opt/homebrew/bin and /usr/local/bin at run time." >&2
     fi

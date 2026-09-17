@@ -168,5 +168,40 @@ class TestActiveAndFilter(unittest.TestCase):
         return sqlite3.connect(self.tmp.name)
 
 
+class TestProgressDoesNotClobberUserIntent(unittest.TestCase):
+    """
+    Bấm tạm dừng xong, một dòng tiến trình còn sót trong bộ đệm stdout được đọc
+    ra là đủ để lật status về 'downloading' — nhìn từ ngoài đúng như nút tạm
+    dừng không ăn. Cùng cơ chế nuốt 'cancelling' nên bản ghi kết thúc thành
+    'failed' thay vì 'cancelled'. Đo bằng test để không tái diễn.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.svc = HistoryService(db_path=self.tmp.name)
+        self.svc.create_task("t1", "https://example.com/v", source="desktop")
+
+    def tearDown(self):
+        os.unlink(self.tmp.name)
+
+    def test_progress_does_not_resurrect_a_paused_task(self):
+        self.svc.update_task("t1", status="paused")
+        self.svc.update_progress("t1", 55.0, avg_speed="1MiB/s")
+        task = self.svc.get_task("t1")
+        self.assertEqual(task["status"], "paused")
+        # Tiến trình vẫn phải được ghi — chỉ status là bất khả xâm phạm.
+        self.assertEqual(task["progress"], 55.0)
+
+    def test_progress_does_not_cancel_a_cancellation(self):
+        self.svc.update_task("t1", status="cancelling")
+        self.svc.update_progress("t1", 80.0)
+        self.assertEqual(self.svc.get_task("t1")["status"], "cancelling")
+
+    def test_progress_still_moves_pending_to_downloading(self):
+        self.assertEqual(self.svc.get_task("t1")["status"], "pending")
+        self.svc.update_progress("t1", 5.0)
+        self.assertEqual(self.svc.get_task("t1")["status"], "downloading")
+
+
 if __name__ == "__main__":
     unittest.main()
