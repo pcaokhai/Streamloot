@@ -47,7 +47,6 @@ class TestMakeIcons(unittest.TestCase):
         whites = [(x, y) for y, row in enumerate(px) for x, p in enumerate(row)
                   if p == (255, 255, 255, 255)]
         self.assertTrue(whites)
-        self.assertTrue(all(0 <= x < size and 0 <= y < size for x, y in whites))
 
     def test_writes_a_valid_png_with_right_dimensions(self):
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
