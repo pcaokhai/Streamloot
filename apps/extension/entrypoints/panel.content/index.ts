@@ -14,6 +14,7 @@
  */
 import './style.css';
 import type { Capture, FormatOption, ProgressEvent, VideoInfoPayload } from '../../lib/types';
+import { pickCapture } from '../../lib/pick';
 
 /**
  * Panel KHÔNG gọi HTTP trực tiếp.
@@ -82,19 +83,28 @@ export default defineContentScript({
      * Thời lượng tách hai thứ đó dứt khoát mà không cần đoán tên miền.
      * Chưa đo xong thì tạm giữ nếp cũ là cái mới nhất.
      */
-    function pickCapture(list: Capture[]): Capture | undefined {
-      if (!list.length) return undefined;
-      if (chosenUrl) {
-        const manual = list.find((c) => c.url === chosenUrl);
-        if (manual) return manual; // người dùng đã tự chọn thì tôn trọng
+    /**
+     * Thời lượng phim mà TRANG đang phát, lấy từ thẻ <video>.
+     *
+     * Đây là tín hiệu chuẩn nhất: trang biết chính xác nó đang phát gì. Đọc
+     * `.duration` không vi phạm B7 — B7 cấm đọc `.src` (blob URL của MSE thì
+     * tải không được), còn thời lượng chỉ là một con số.
+     */
+    function pageDuration(): number | null {
+      for (const v of document.querySelectorAll('video')) {
+        const d = (v as HTMLVideoElement).duration;
+        if (Number.isFinite(d) && d > 0) return d;
       }
-      const measured = list.filter((c) => typeof c.durationSec === 'number' && c.durationSec! > 0);
-      if (!measured.length) return list[list.length - 1];
-      return measured.reduce((a, b) => (b.durationSec! > a.durationSec! ? b : a));
+      return null;
     }
 
+
     const fmtDur = (sec?: number | null): string => {
-      if (typeof sec !== 'number' || sec <= 0) return 'đang đo…';
+      // undefined = chưa đo xong; null = đo rồi mà không ra. Gộp hai cái làm một
+      // là nói dối: người dùng ngồi đợi một phép đo đã kết thúc từ lâu.
+      if (sec === undefined) return 'đang đo…';
+      if (sec === null || sec <= 0) return 'không đo được';
+      if (typeof sec !== 'number') return 'không đo được';
       const h = Math.floor(sec / 3600);
       const m = Math.floor((sec % 3600) / 60);
       const s = Math.floor(sec % 60);
@@ -103,8 +113,21 @@ export default defineContentScript({
     };
 
     function render(root: HTMLElement) {
-      const cap = pickCapture(captures);
-      if (!cap) return;
+      const cap = pickCapture(captures, {
+        pageHost: location.hostname,
+        pageDurationSec: pageDuration(),
+        chosenUrl,
+      });
+      if (!cap) {
+        // Chưa đủ cơ sở để chọn. Nói ra điều đó thay vì im lặng hiện panel rỗng
+        // hoặc lặng lẽ chọn nhầm quảng cáo.
+        root.innerHTML = '';
+        const wait = document.createElement('div');
+        wait.className = 'sl-sub';
+        wait.textContent = `Đang xác định stream… (${captures.length} ứng viên)`;
+        root.append(wait);
+        return;
+      }
 
       root.innerHTML = '';
       const head = document.createElement('div');
