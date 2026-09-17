@@ -50,6 +50,44 @@ class _Target(AppKit.NSObject):
     def onQuit_(self, sender):
         self._handlers['quit']()
 
+    # Ba selector dưới đây là BIÊN GIỚI Objective-C: exception ném ra khỏi đây
+    # không có traceback Python nào, AppKit chỉ im lặng nuốt. Mọi thứ trong này
+    # phải tự bọc và tự ghi log, nếu không một cú bấm hỏng là hỏng không dấu vết.
+    def onToggle_(self, sender):
+        tid = sender.representedObject()
+        Logger.get_logger().info(f"Menu bar: bấm toggle cho task {tid}")
+        try:
+            self._handlers['task']['toggle'](tid)
+        except Exception as e:
+            Logger.error(f"Menu bar: onToggle_ hỏng với task {tid}: {e}", exc_info=True)
+
+    def onCancel_(self, sender):
+        tid = sender.representedObject()
+        Logger.get_logger().info(f"Menu bar: bấm huỷ cho task {tid}")
+        try:
+            self._handlers['task']['cancel'](tid)
+        except Exception as e:
+            Logger.error(f"Menu bar: onCancel_ hỏng với task {tid}: {e}", exc_info=True)
+
+
+class _MenuDelegate(AppKit.NSObject):
+    """
+    macOS gọi menuNeedsUpdate_ NGAY TRƯỚC khi hiện menu, nên menu bar lấy dữ
+    liệu tươi mà không cần poll gì cả — khác hẳn panel và popup của extension.
+
+    Menu cũ được dựng một lần lúc cài nên nội dung đóng băng vĩnh viễn.
+    """
+
+    def initWithBuilder_(self, builder):
+        self = objc.super(_MenuDelegate, self).init()
+        if self is None:
+            return None
+        self._builder = builder
+        return self
+
+    def menuNeedsUpdate_(self, menu):
+        self._builder(menu)
+
 
 def set_dock_icon(visible: bool) -> None:
     """
@@ -72,6 +110,7 @@ def install(
     on_show: Callable[[], None],
     on_quit: Callable[[], None],
     port: int,
+    task_actions: dict,
     title: str = "⤓",
 ) -> None:
     """
@@ -90,16 +129,11 @@ def install(
     nào thoát app hay biết backend đang chạy.
     """
     Foundation.NSOperationQueue.mainQueue().addOperationWithBlock_(
-        lambda: _build(on_show, on_quit, port, title)
+        lambda: _build(on_show, on_quit, port, title, task_actions)
     )
 
 
-def _build(
-    on_show: Callable[[], None],
-    on_quit: Callable[[], None],
-    port: int,
-    title: str,
-) -> None:
+def _build(on_show, on_quit, port, title, task_actions):
     """Dựng NSStatusItem. LUÔN chạy trên main thread (xem install)."""
     try:
         bar = AppKit.NSStatusBar.systemStatusBar()
@@ -110,37 +144,93 @@ def _build(
             button.setTitle_(title)
             button.setToolTip_("Streamloot — backend đang chạy")
 
-        target = _Target.alloc().initWithHandlers_({'show': on_show, 'quit': on_quit})
-
+        target = _Target.alloc().initWithHandlers_({
+            'show': on_show,
+            'quit': on_quit,
+            'task': task_actions,
+        })
         menu = AppKit.NSMenu.alloc().init()
+        # Bắt buộc: mặc định NSMenu tự bật lại mọi item có target+action hợp lệ,
+        # ghi đè setEnabled_ của ta — mục "Tạm dừng" của task 'pending' sẽ lại
+        # bấm được. Tắt đi thì setEnabled_ mới là tiếng nói cuối cùng.
+        menu.setAutoenablesItems_(False)
 
-        show_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Mở cửa sổ Streamloot", "onShow:", ""
-        )
-        show_item.setTarget_(target)
-        menu.addItem_(show_item)
+        def rebuild(m):
+            _rebuild_safe(m, target, port, task_actions)
 
-        menu.addItem_(AppKit.NSMenuItem.separatorItem())
-
-        # Mục trạng thái: người dùng phải thấy được backend đang chạy ở cổng nào,
-        # nếu không thì extension báo "không kết nối được" mà không ai hiểu vì sao.
-        status = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            f"Backend: 127.0.0.1:{port}", "", ""
-        )
-        status.setEnabled_(False)
-        menu.addItem_(status)
-
-        menu.addItem_(AppKit.NSMenuItem.separatorItem())
-
-        quit_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Thoát Streamloot", "onQuit:", "q"
-        )
-        quit_item.setTarget_(target)
-        menu.addItem_(quit_item)
+        delegate = _MenuDelegate.alloc().initWithBuilder_(rebuild)
+        menu.setDelegate_(delegate)
+        rebuild(menu)
 
         item.setMenu_(menu)
-
-        _keepalive.extend([item, target, menu])
+        _keepalive.extend([item, target, menu, delegate])
         Logger.get_logger().debug("Menu bar item installed")
     except Exception as e:
         Logger.error(f"Không dựng được menu bar item: {e}", exc_info=True)
+
+
+def _rebuild_safe(menu, target, port, task_actions):
+    """
+    Dựng lại menu, được gọi từ `_MenuDelegate.menuNeedsUpdate_` mỗi lần menu
+    sắp mở — ngoài phạm vi try/except một lần lúc cài trong `_build`. Không để
+    lộ exception ra ngoài callback ObjC: menu vỡ trong im lặng là đúng loại bug
+    đắt nhất của app này — log rồi để menu ở trạng thái dở dang, còn hơn ném ra
+    ngoài mất luôn dấu vết.
+    """
+    try:
+        menu.removeAllItems()
+        _populate(menu, target, port, task_actions['list']())
+    except Exception as e:
+        Logger.error(f"Không dựng lại được menu bar: {e}", exc_info=True)
+
+
+def _populate(menu, target, port, active_tasks):
+    from apps.desktop.statusbar_menu import build_menu_model
+
+    model = build_menu_model(active_tasks)
+    dl = model["download"]
+
+    if dl is not None:
+        info = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            dl["label"], "", ""
+        )
+        info.setEnabled_(False)
+        menu.addItem_(info)
+
+        label = "Tiếp tục" if dl["action"] == "resume" else "Tạm dừng"
+        toggle = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            label, "onToggle:", ""
+        )
+        toggle.setTarget_(target)
+        toggle.setRepresentedObject_(dl["task_id"])
+        toggle.setEnabled_(dl.get("enabled", True))
+        menu.addItem_(toggle)
+
+        cancel = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Huỷ", "onCancel:", ""
+        )
+        cancel.setTarget_(target)
+        cancel.setRepresentedObject_(dl["task_id"])
+        menu.addItem_(cancel)
+
+        menu.addItem_(AppKit.NSMenuItem.separatorItem())
+
+    show = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+        "Mở cửa sổ Streamloot", "onShow:", ""
+    )
+    show.setTarget_(target)
+    menu.addItem_(show)
+    menu.addItem_(AppKit.NSMenuItem.separatorItem())
+
+    status = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+        f"Backend: 127.0.0.1:{port}", "", ""
+    )
+    status.setEnabled_(False)
+    menu.addItem_(status)
+    menu.addItem_(AppKit.NSMenuItem.separatorItem())
+
+    quit_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+        "Thoát Streamloot", "onQuit:", "q"
+    )
+    quit_item.setTarget_(target)
+    menu.addItem_(quit_item)

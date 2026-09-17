@@ -84,7 +84,32 @@ def close_verdict(quitting: bool):
     return None if quitting else False
 
 
+def _port_in_use(port: int) -> bool:
+    """True nếu đã có tiến trình nào nghe ở 127.0.0.1:port."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def main():
+    # Mở bản thứ hai khi bản cũ còn chạy là chuyện thường (bấm nhầm icon, hoặc
+    # đang chạy từ script rồi mở tiếp bản .app). Không kiểm trước thì uvicorn và
+    # http server của pywebview cùng ném "Address already in use" ở thread nền,
+    # app chết câm — nhìn từ ngoài y hệt "bản build hỏng".
+    if _port_in_use(DESKTOP_PORT):
+        msg = (
+            f"Streamloot đã chạy rồi (cổng {DESKTOP_PORT} đang bận).\n\n"
+            "Dùng biểu tượng ⤓ trên thanh menu để mở lại cửa sổ, hoặc thoát bản "
+            "đang chạy trước khi mở bản này."
+        )
+        Logger.error(f"Không khởi động được: cổng {DESKTOP_PORT} đã có tiến trình khác nghe.")
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_("Streamloot đã chạy")
+        alert.setInformativeText_(msg)
+        alert.runModal()
+        return
+
     server_thread = threading.Thread(target=start_backend, daemon=True)
     server_thread.start()
     time.sleep(1)  # give the backend a moment to bind before the page's first fetch
@@ -143,6 +168,17 @@ def main():
         window.show()
         statusbar.set_dock_icon(True)
         statusbar.activate()
+        # B2 cho phép ẩn cửa sổ mà app vẫn chạy, nên ẩn xong mở lại có thể đã
+        # khác rất nhiều — bảo trang dựng lại danh sách.
+        #
+        # Chỉ bọc evaluate_js: hàm này được gọi từ một ObjC action selector
+        # (_Target.onShow_), mà evaluate_js ném được (webview chưa sẵn sàng,
+        # trang đang điều hướng). Để lọt ra là mục "Mở cửa sổ Streamloot" vỡ im
+        # lặng. window.show() KHÔNG bọc — cái đó hỏng thì phải kêu to.
+        try:
+            window.evaluate_js("window.dispatchEvent(new Event('streamloot:refresh'))")
+        except Exception as e:
+            Logger.error(f"Không gửi được streamloot:refresh vào cửa sổ: {e}", exc_info=True)
 
     def quit_app():
         global _quitting
@@ -155,7 +191,62 @@ def main():
         phải lúc import: `platforms/cocoa.py` gọi setActivationPolicy_(0) ngay
         khi module được import, nên mọi thay đổi trước đó sẽ bị ghi đè.
         """
-        statusbar.install(on_show=show_window, on_quit=quit_app, port=DESKTOP_PORT)
+        from services.history_service import HistoryService
+
+        hist = HistoryService()
+
+        def toggle(task_id):
+            # Gọi thẳng endpoint dưới dạng hàm, đi vòng qua HTTP của chính mình
+            # là thừa — nhưng cũng đi vòng qua luôn cơ chế bắt HTTPException của
+            # FastAPI. Các hàm này `raise HTTPException` cho những tình huống
+            # bình thường (đã pause rồi, process đã chết...); để lọt ra ngoài
+            # đây là ném thẳng từ một ObjC action selector, im lặng vỡ menu.
+            try:
+                task = hist.get_task(task_id)
+                if not task:
+                    # WARNING chứ không phải DEBUG: ở bản chạy thật debug bị tắt,
+                    # nên nhánh này từng nuốt trọn cú bấm mà log không có một chữ.
+                    Logger.error(
+                        f"Menu bar: không đọc được task {task_id} (không tồn tại "
+                        f"hoặc DB đang bận) — bỏ qua toggle"
+                    )
+                    return
+                from apps.api.main import pause_download, resume_download
+                (resume_download if task["status"] == "paused" else pause_download)(task_id)
+            except Exception as e:
+                Logger.error(f"Menu bar: không toggle được task {task_id}: {e}", exc_info=True)
+
+        def cancel(task_id):
+            try:
+                from apps.api.main import cancel_download
+                cancel_download(task_id)
+            except Exception as e:
+                Logger.error(f"Menu bar: không huỷ được task {task_id}: {e}", exc_info=True)
+
+        def _off_main(fn, task_id):
+            """
+            Chạy hành động menu ở thread khác.
+
+            `onToggle_`/`onCancel_` là ObjC action selector: chúng chạy trên MAIN
+            THREAD, cũng là thread vẽ giao diện. Bên trong lại là SQLite + tín
+            hiệu tiến trình — chỉ cần kẹt khoá DB một nhịp là cả cửa sổ đứng hình
+            (đã gặp: bấm Huỷ xong cửa sổ treo). Đẩy sang thread nền thì UI không
+            bao giờ phải đợi I/O.
+            """
+            threading.Thread(target=fn, args=(task_id,), daemon=True).start()
+
+        statusbar.install(
+            on_show=show_window,
+            on_quit=quit_app,
+            port=DESKTOP_PORT,
+            task_actions={
+                "list": hist.get_active_tasks,
+                # Bọc qua _off_main: xem ghi chú ở đó — hai hàm này bị gọi từ ObjC
+                # action selector nên chạy thẳng là chạy trên thread giao diện.
+                "toggle": lambda tid: _off_main(toggle, tid),
+                "cancel": lambda tid: _off_main(cancel, tid),
+            },
+        )
 
     debug = os.getenv("DOWNLOADER_DEBUG") == "1"
     if debug:

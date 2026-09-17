@@ -21,7 +21,24 @@ class HistoryService:
         self._init_db()
         
     def _get_connection(self):
-        return sqlite3.connect(self.db_path)
+        """
+        WAL + busy timeout, không phải `connect()` trần.
+
+        Luồng tải ghi tiến trình liên tục, trong khi menu bar và cửa sổ app đọc
+        từ thread khác. Ở journal mode mặc định, một lượt ghi khoá độc quyền cả
+        file nên bên ĐỌC cũng bị chặn: menu bar gọi `get_task` giữa lúc tải sẽ
+        treo tới lúc hết giờ rồi trả None, và cú bấm biến mất không dấu vết.
+        WAL cho đọc chạy song song với ghi; busy timeout lo phần ghi-đụng-ghi.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=15000")
+        except sqlite3.Error as e:
+            # WAL không bật được (ổ mạng, quyền thư mục) thì vẫn chạy tiếp với
+            # journal mặc định — chậm và dễ đụng khoá hơn, nhưng không chết.
+            Logger.error(f"Không bật được WAL cho {self.db_path}: {e}")
+        return conn
         
     def _init_db(self):
         try:
@@ -37,6 +54,7 @@ class HistoryService:
                         status TEXT NOT NULL,
                         output_path TEXT,
                         playlist_name TEXT,
+                        source TEXT DEFAULT 'unknown',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
@@ -45,6 +63,16 @@ class HistoryService:
                     cursor.execute("ALTER TABLE download_history ADD COLUMN playlist_name TEXT")
                 except sqlite3.OperationalError:
                     pass
+
+                # Migrate CSDL cũ: thêm cột source nếu chưa có. Không backfill —
+                # không có cách nào biết ngược nguồn của bản ghi đã tồn tại.
+                for table in ("download_history", "download_tasks"):
+                    try:
+                        cursor.execute(
+                            f"ALTER TABLE {table} ADD COLUMN source TEXT DEFAULT 'unknown'"
+                        )
+                    except sqlite3.OperationalError:
+                        pass
 
                 # In-flight API task tracking (task_id, status, progress). Separate
                 # table from download_history: this tracks the lifecycle of a
@@ -60,6 +88,7 @@ class HistoryService:
                         output_path TEXT,
                         error_msg TEXT,
                         avg_speed TEXT,
+                        source TEXT DEFAULT 'unknown',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
@@ -103,7 +132,9 @@ class HistoryService:
         except sqlite3.Error as e:
             Logger.error(f"Failed to initialize history database: {e}")
             
-    def save_record(self, title: str, url: str, m3u8_url: str, format_id: Optional[str], status: str, output_path: Optional[str], playlist_name: Optional[str] = None):
+    def save_record(self, title: str, url: str, m3u8_url: str, format_id: Optional[str],
+                    status: str, output_path: Optional[str], playlist_name: Optional[str] = None,
+                    source: str = "unknown"):
         """
         Saves a clean download record to the SQLite database.
         """
@@ -124,22 +155,22 @@ class HistoryService:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT INTO download_history 
-                    (title, url, m3u8_url, format_id, status, output_path, playlist_name, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (clean_title, url, m3u8_url, clean_format, status, clean_path, playlist_name, datetime.now()))
+                    INSERT INTO download_history
+                    (title, url, m3u8_url, format_id, status, output_path, playlist_name, source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (clean_title, url, m3u8_url, clean_format, status, clean_path, playlist_name, source, datetime.now()))
                 conn.commit()
                 Logger.get_logger().debug(f"Download history saved: {status}")
         except sqlite3.Error as e:
             Logger.error(f"Failed to save history record: {e}")
 
-    def create_task(self, task_id: str, url: str) -> None:
+    def create_task(self, task_id: str, url: str, source: str = "unknown") -> None:
         """Registers a new API download task in 'pending' state."""
         try:
             with self._get_connection() as conn:
                 conn.execute(
-                    "INSERT INTO download_tasks (task_id, url, status) VALUES (?, ?, 'pending')",
-                    (task_id, url),
+                    "INSERT INTO download_tasks (task_id, url, status, source) VALUES (?, ?, 'pending', ?)",
+                    (task_id, url, source),
                 )
                 conn.commit()
         except sqlite3.Error as e:
@@ -174,6 +205,44 @@ class HistoryService:
         except sqlite3.Error as e:
             Logger.error(f"Failed to update task record: {e}")
 
+    #: Trạng thái do NGƯỜI DÙNG đặt. Một dòng tiến trình không được phép kéo
+    #: task ra khỏi những trạng thái này.
+    USER_INTENT_STATUSES = ("paused", "cancelling")
+
+    def update_progress(self, task_id: str, progress: float,
+                        avg_speed: Optional[str] = None) -> None:
+        """
+        Ghi tiến trình mà KHÔNG giẫm lên ý định của người dùng.
+
+        Trước đây mỗi dòng tiến trình đều ghi thẳng status='downloading'. Bấm
+        tạm dừng xong, chỉ cần một dòng còn nằm trong bộ đệm stdout được đọc ra
+        là status bị lật ngược về 'downloading' — menu hiện lại "Tạm dừng" và
+        nhìn như nút không ăn. Cùng cơ chế đó nuốt luôn 'cancelling', nên bản
+        ghi kết thúc thành 'failed' thay vì 'cancelled'.
+
+        CASE nằm trong SQL để phép so sánh và phép ghi là một thao tác nguyên tử:
+        đọc-rồi-ghi ở Python sẽ có khe hở đúng bằng lúc người dùng bấm nút.
+        """
+        placeholders = ",".join("?" for _ in self.USER_INTENT_STATUSES)
+        sets = ["updated_at = ?", "progress = ?"]
+        values = [datetime.now(), progress]
+        if avg_speed is not None:
+            sets.append("avg_speed = ?")
+            values.append(avg_speed)
+        sets.append(
+            f"status = CASE WHEN status IN ({placeholders}) THEN status ELSE 'downloading' END"
+        )
+        values.extend(self.USER_INTENT_STATUSES)
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    f"UPDATE download_tasks SET {', '.join(sets)} WHERE task_id = ?",
+                    values + [task_id],
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            Logger.error(f"Failed to update task progress: {e}")
+
     def get_task(self, task_id: str) -> Optional[dict]:
         """Returns the current state of a task, or None if it doesn't exist."""
         try:
@@ -188,14 +257,79 @@ class HistoryService:
 
     TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
-    def get_history(self, limit: int = 50) -> list:
-        """Returns the most recent completed/failed download records."""
+    def get_active_tasks(self) -> list:
+        """
+        Mọi task chưa kết thúc, mới nhất trước.
+
+        Bao gồm cả 'paused': nó chưa xong, và người dùng cần thấy để bấm tiếp tục.
+        Đây là nguồn sự thật cho câu hỏi "đang có gì chạy" — cả cửa sổ app lẫn
+        extension đều dựng lại trạng thái từ đây thay vì tự nhớ.
+        """
+        placeholders = ",".join("?" for _ in self.TERMINAL_STATUSES)
         try:
             with self._get_connection() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute(
-                    "SELECT * FROM download_history ORDER BY created_at DESC LIMIT ?", (limit,)
+                    f"SELECT * FROM download_tasks WHERE status NOT IN ({placeholders})"
+                    " ORDER BY created_at DESC",
+                    tuple(self.TERMINAL_STATUSES),
                 )
+                return [dict(row) for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            Logger.error(f"Failed to read active tasks: {e}")
+            return []
+
+    def fail_interrupted_tasks(self) -> int:
+        """
+        Đánh dấu thất bại mọi task còn dở từ lần chạy trước. Gọi lúc API khởi động.
+
+        Không có tiến trình con nào sống sót qua lần thoát của process sở hữu nó,
+        nên một hàng 'pending'/'downloading'/'paused' còn sót lại là tải ma: menu
+        bar hiện nó mãi mãi, nút Tạm dừng trả 409, không có cách nào xoá. Dọn ở
+        đây chứ không phải trong endpoint — dọn cùng chỗ với phần dọn bản ghi bẩn
+        của download_history.
+
+        Returns: số hàng đã dọn.
+        """
+        placeholders = ",".join("?" for _ in self.TERMINAL_STATUSES)
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "UPDATE download_tasks SET status = 'failed',"
+                    " error_msg = 'Interrupted by app restart',"
+                    " updated_at = CURRENT_TIMESTAMP"
+                    f" WHERE status NOT IN ({placeholders})",
+                    tuple(self.TERMINAL_STATUSES),
+                )
+                conn.commit()
+                if cursor.rowcount:
+                    Logger.warning(
+                        f"Dọn {cursor.rowcount} task dở dang từ lần chạy trước"
+                    )
+                return cursor.rowcount
+        except sqlite3.Error as e:
+            Logger.error(f"Failed to clean up interrupted tasks: {e}")
+            return 0
+
+    def get_history(self, limit: int = 50, source: Optional[str] = None) -> list:
+        """
+        Bản ghi tải gần nhất. `source=None` trả mọi nguồn — cửa sổ app dùng thế
+        (D6); extension truyền 'extension' để chỉ lấy của nó.
+        """
+        try:
+            with self._get_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                if source:
+                    cursor = conn.execute(
+                        "SELECT * FROM download_history WHERE source = ?"
+                        " ORDER BY created_at DESC LIMIT ?",
+                        (source, limit),
+                    )
+                else:
+                    cursor = conn.execute(
+                        "SELECT * FROM download_history ORDER BY created_at DESC LIMIT ?",
+                        (limit,),
+                    )
                 return [dict(row) for row in cursor.fetchall()]
         except sqlite3.Error as e:
             Logger.error(f"Failed to read history: {e}")

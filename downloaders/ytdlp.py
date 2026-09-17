@@ -167,7 +167,15 @@ class YtDlpDownloader(BaseDownloader):
         
         try:
             start_time = time.time()
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            # start_new_session: cho tiến trình tải một NHÓM riêng.
+            #
+            # yt-dlp giao việc tải HLS cho ffmpeg, nên tiến trình thật sự kéo
+            # byte về là cháu chứ không phải con. Muốn tạm dừng/huỷ đến nơi thì
+            # phải gửi tín hiệu cho cả nhóm (utils/proc.signal_tree) — mà muốn
+            # gửi cho cả nhóm một cách an toàn thì nhóm đó phải KHÁC nhóm của
+            # backend, nếu không backend tự dừng chính mình.
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       text=True, start_new_session=True)
 
             # Hand the live process handle to the caller immediately (before the
             # blocking read loop below) so it can be cancelled from outside.

@@ -14,6 +14,7 @@
  */
 import './style.css';
 import type { Capture, FormatOption, ProgressEvent, VideoInfoPayload } from '../../lib/types';
+import { pickCapture } from '../../lib/pick';
 
 /**
  * Panel KHÔNG gọi HTTP trực tiếp.
@@ -23,7 +24,16 @@ import type { Capture, FormatOption, ProgressEvent, VideoInfoPayload } from '../
  * 401. Mọi lời gọi đi qua service worker, nơi có đúng origin
  * `chrome-extension://<id>`.
  */
-const ask = <T,>(msg: unknown): Promise<T> => browser.runtime.sendMessage(msg) as Promise<T>;
+const ask = <T,>(msg: unknown): Promise<T> =>
+  // Có hạn giờ: trong MV3, service worker bị giết khi rảnh, và nếu nó chết đúng
+  // lúc đang xử lý thì `sendMessage` không bao giờ resolve — panel đứng im ở
+  // "Đang bắt đầu…" và người dùng không biết là đang chờ hay đã hỏng.
+  Promise.race([
+    browser.runtime.sendMessage(msg) as Promise<T>,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('Service worker không trả lời (thử tải lại trang)')), 15000),
+    ),
+  ]);
 
 function toPayload(cap: Capture): VideoInfoPayload {
   return {
@@ -44,6 +54,8 @@ export default defineContentScript({
     let captures: Capture[] = [];
     let mounted = false;
     let activeTask: string | null = null;
+    // URL người dùng tự chọn trong danh sách stream — null là để hệ thống tự chọn.
+    let chosenUrl: string | null = null;
     let onProgress: ((e?: ProgressEvent, err?: string) => void) | null = null;
 
     const ui = await createShadowRootUi(ctx, {
@@ -62,8 +74,66 @@ export default defineContentScript({
       },
     });
 
+    /**
+     * Chọn stream để tải: DÀI NHẤT, không phải mới nhất.
+     *
+     * Trang phát phim nạp nhiều manifest từ nhiều host cùng lúc, và quảng cáo
+     * thường nạp sau — lấy cái mới nhất là lấy trúng quảng cáo (đã gặp: tải về
+     * một file 805 KB toàn quảng cáo trong khi phim dài một tiếng).
+     * Thời lượng tách hai thứ đó dứt khoát mà không cần đoán tên miền.
+     * Chưa đo xong thì tạm giữ nếp cũ là cái mới nhất.
+     */
+    /**
+     * Thời lượng phim mà TRANG đang phát, lấy từ thẻ <video>.
+     *
+     * Đây là tín hiệu chuẩn nhất: trang biết chính xác nó đang phát gì. Đọc
+     * `.duration` không vi phạm B7 — B7 cấm đọc `.src` (blob URL của MSE thì
+     * tải không được), còn thời lượng chỉ là một con số.
+     */
+    function pageDuration(): number | null {
+      for (const v of document.querySelectorAll('video')) {
+        const d = (v as HTMLVideoElement).duration;
+        if (Number.isFinite(d) && d > 0) return d;
+      }
+      return null;
+    }
+
+
+    const fmtDur = (sec?: number | null): string => {
+      // undefined = chưa đo xong; null = đo rồi mà không ra. Gộp hai cái làm một
+      // là nói dối: người dùng ngồi đợi một phép đo đã kết thúc từ lâu.
+      if (sec === undefined) return 'đang đo…';
+      if (sec === null || sec <= 0) return 'không đo được';
+      if (typeof sec !== 'number') return 'không đo được';
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = Math.floor(sec % 60);
+      return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+               : `${m}:${String(s).padStart(2, '0')}`;
+    };
+
     function render(root: HTMLElement) {
-      const cap = captures[captures.length - 1];
+      const cap = pickCapture(captures, {
+        pageHost: location.hostname,
+        pageDurationSec: pageDuration(),
+        chosenUrl,
+      });
+      // Vì sao chọn cái này: in ra để khi chọn sai còn có cơ sở mà lần, thay vì
+      // phải đoán từ ảnh chụp màn hình. Referer là tín hiệu chính, nên nó phải
+      // nhìn thấy được.
+      console.debug(
+        '[Streamloot] ứng viên:',
+        captures.map((c) => ({
+          host: c.host,
+          referer: c.referer,
+          duration: c.durationSec,
+        })),
+        '| trang:', location.hostname,
+        '| thời lượng <video>:', pageDuration(),
+        '| chọn:', cap?.host,
+      );
+      // pickCapture chỉ trả rỗng khi KHÔNG còn ứng viên nào — nó không bao giờ
+      // bắt panel đợi một phép đo (xem lib/pick.ts bước 5).
       if (!cap) return;
 
       root.innerHTML = '';
@@ -83,7 +153,29 @@ export default defineContentScript({
 
       const sub = document.createElement('div');
       sub.className = 'sl-sub';
-      sub.textContent = cap.host;
+      sub.textContent = `${cap.host} · ${fmtDur(cap.durationSec)}`;
+
+      // Nhiều stream thì cho chọn tay: phép đo thời lượng đúng gần hết các lần,
+      // nhưng khi nó sai thì người dùng phải có đường sửa, chứ không phải tải về
+      // rồi mới biết nhầm.
+      let picker: HTMLSelectElement | null = null;
+      if (captures.length > 1) {
+        picker = document.createElement('select');
+        const ranked = [...captures].sort(
+          (a, b) => (b.durationSec ?? -1) - (a.durationSec ?? -1),
+        );
+        for (const c of ranked) {
+          const o = document.createElement('option');
+          o.value = c.url;
+          o.textContent = `${c.host} · ${fmtDur(c.durationSec)}`;
+          o.selected = c.url === cap.url;
+          picker.append(o);
+        }
+        picker.onchange = () => {
+          chosenUrl = picker!.value;
+          render(root);
+        };
+      }
 
       const row = document.createElement('div');
       row.className = 'sl-row';
@@ -102,7 +194,9 @@ export default defineContentScript({
       bar.append(fill);
       bar.style.display = 'none';
 
-      root.append(head, sub, row, msg, bar);
+      root.append(head, sub);
+      if (picker) root.append(picker);
+      root.append(row, msg, bar);
 
       const say = (text: string, isError = false) => {
         msg.textContent = text;
@@ -136,11 +230,19 @@ export default defineContentScript({
       btn.onclick = async () => {
         btn.disabled = true;
         say('Đang bắt đầu…');
-        const r = await ask<{ ok: boolean; taskId?: string; error?: string }>({
-          type: 'startDownload',
-          info: payload,
-          formatId: select.value || null,
-        });
+        let r: { ok: boolean; taskId?: string; error?: string };
+        try {
+          r = await ask<{ ok: boolean; taskId?: string; error?: string }>({
+            type: 'startDownload',
+            info: payload,
+            formatId: select.value || null,
+          });
+        } catch (err) {
+          // Không bắt thì promise bị từ chối lặng lẽ và nút kẹt ở "Đang bắt đầu…".
+          say(err instanceof Error ? err.message : String(err), true);
+          btn.disabled = false;
+          return;
+        }
         if (!r.ok) {
           say(r.error ?? 'Tải thất bại', true);
           btn.disabled = false;

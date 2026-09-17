@@ -62,7 +62,14 @@ class Logger:
         cls._debug_mode = debug
         cls._init_logger()
         if cls._file_handler:
-            cls._file_handler.setLevel(logging.DEBUG if debug else logging.ERROR)
+            # INFO chứ không phải ERROR cho file log.
+            #
+            # Để ERROR thì cả một phiên chạy chỉ để lại vài dòng, và mọi sự kiện
+            # "đã bấm nút này, đã đi vào nhánh kia" đều biến mất — đúng lúc cần
+            # tìm nguyên nhân thì không có gì để đọc. File log là thứ người dùng
+            # gửi lại khi báo lỗi; nó phải kể được câu chuyện. Console vẫn sạch
+            # vì đó là handler riêng.
+            cls._file_handler.setLevel(logging.DEBUG if debug else logging.INFO)
 
     @classmethod
     def _init_logger(cls):
@@ -89,10 +96,14 @@ class Logger:
         cls._logger.setLevel(logging.DEBUG) 
         cls._logger.propagate = False
 
-        # File Handler: Only logs ERROR by default, or DEBUG if debug_mode is True.
+        # File Handler: INFO by default, DEBUG khi bật debug_mode.
         # delay=True ensures NO file is created on disk unless a record is actually emitted.
+        #
+        # Mức mặc định phải khớp với `init()` — trước đây một chỗ để ERROR, một
+        # chỗ để INFO, và chỗ nào chạy trước thì thắng: sửa một chỗ không đủ, log
+        # vẫn trống trơn. Giữ hai nơi này giống hệt nhau.
         cls._file_handler = logging.FileHandler(log_file, encoding='utf-8', delay=True)
-        cls._file_handler.setLevel(logging.DEBUG if cls._debug_mode else logging.ERROR)
+        cls._file_handler.setLevel(logging.DEBUG if cls._debug_mode else logging.INFO)
         
         file_format = CleanFileFormatter(
             fmt='[%(asctime)s] [%(levelname)s] [%(module)s:%(lineno)d] - %(message)s',

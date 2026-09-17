@@ -13,7 +13,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from threading import Lock
-from typing import List, Optional, Dict
+from typing import List, Literal, Optional, Dict
 import asyncio
 from sse_starlette.sse import EventSourceResponse
 
@@ -22,6 +22,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from services.download_service import DownloadService
+from services.manifest_probe import probe_duration
+from utils.proc import signal_tree
 from services.history_service import HistoryService
 from extractors.factory import ExtractorFactory
 from downloaders.ytdlp import YtDlpDownloader
@@ -100,21 +102,21 @@ def verify_client(
     x_streamloot_extension_id: Optional[str] = Header(default=None),
 ):
     """
-    Nhận BA cách, đều nhắm đúng mô hình đe dọa của ADR 0004: một trang web độc
+    Nhận HAI cách, đều nhắm đúng mô hình đe dọa của ADR 0004: một trang web độc
     hại gọi ngầm tới localhost.
 
     1. `Authorization: Bearer <API_KEY>` — desktop UI và client ngoài trình duyệt.
     2. Header `X-Streamloot-Extension-Id` khớp ID đã ghim — browser extension.
-    3. `Origin` khớp ID đã ghim — dự phòng, xem ghi chú bên dưới.
 
-    **Vì sao phải dùng custom header chứ không phải `Origin`:** extension khai
+    **Vì sao dùng custom header chứ không phải `Origin`:** extension khai
     `host_permissions` cho host này, mà với host đã được cấp quyền thì Chrome cho
-    gọi thẳng, KHÔNG ràng buộc CORS, và **không gửi header `Origin`**. Đường (3)
-    vì thế không bao giờ khớp cho extension thật — giữ lại chỉ để phòng trường
-    hợp Chrome đổi hành vi. Đã đo: request từ service worker tới đây có
-    `Origin: None`.
+    gọi thẳng, KHÔNG ràng buộc CORS, và **không gửi header `Origin`**. Một nhánh
+    chấp nhận qua `Origin` vì thế không bao giờ khớp cho extension thật — đã đo:
+    request từ service worker tới đây có `Origin: None`. Tham số `origin` vẫn
+    được giữ và ghi log khi từ chối — đó là manh mối chẩn đoán khi request bị
+    401 mà không rõ vì sao.
 
-    **Vì sao (2) vẫn chặn được trang web độc hại:** trình duyệt KHÔNG cho trang
+    **Vì sao (2) chặn được trang web độc hại:** trình duyệt KHÔNG cho trang
     đặt header tuỳ ý trên request cross-origin nếu chưa qua preflight, mà
     preflight thì bị CORS allowlist chặn (origin của trang không nằm trong đó).
     Trang gửi request đơn giản không kèm header thì rơi thẳng vào 401.
@@ -129,8 +131,6 @@ def verify_client(
     if credentials is not None and secrets.compare_digest(credentials.credentials, API_KEY):
         return "api-key"
     if x_streamloot_extension_id and x_streamloot_extension_id in _extension_ids:
-        return "extension"
-    if origin and origin in _extension_origins:
         return "extension"
     # Một 401 không để lại dấu vết là không chẩn được: người dùng chỉ thấy "app
     # từ chối" mà không ai biết origin nào bị từ chối và đang mong đợi origin nào.
@@ -170,6 +170,14 @@ history = HistoryService()
 
 
 @app.on_event("startup")
+def _startup_fail_interrupted_tasks():
+    # Không tiến trình con nào sống sót qua lần thoát trước, nên mọi task chưa
+    # kết thúc trong DB là tải ma — ba surface đều đọc get_active_tasks() làm
+    # nguồn sự thật, để nguyên là chúng hiện một download không thể điều khiển.
+    history.fail_interrupted_tasks()
+
+
+@app.on_event("startup")
 def _startup_ytdlp_update_check():
     # Non-blocking: log a warning, never fail startup over this.
     try:
@@ -185,21 +193,46 @@ def _startup_ytdlp_update_check():
 
 # --- State Management for SSE + live process handles ---
 class TaskRegistry:
+    """
+    Fan-out: MỖI người nghe một hàng đợi riêng.
+
+    Trước đây một task chỉ có MỘT Queue và `stream_progress` `get()` phá huỷ —
+    hai người nghe cùng lúc (cửa sổ app `hydrate()` nối vào task do extension
+    khởi động và đang stream) thì mỗi sự kiện chỉ rơi vào một trong hai, cả hai
+    cùng nhảy số sai, và bên không nhận được sự kiện cuối sẽ lặp `get()` mãi mãi
+    — rò thread, stream không bao giờ đóng.
+
+    Thread-safety: `broadcast_sync` chạy trên thread worker tải, còn
+    subscribe/unsubscribe chạy từ endpoint async. Lock chỉ bảo vệ danh sách và
+    KHÔNG giữ khi đang `put` (Queue vô hạn nên `put` không chặn, nhưng vẫn chụp
+    ảnh danh sách rồi mới đẩy để không ôm lock qua lời gọi bên ngoài).
+    """
+
     def __init__(self):
-        self.queues: Dict[str, queue.Queue] = {}
+        self.subscribers: Dict[str, List[queue.Queue]] = {}
         self.processes: Dict[str, subprocess.Popen] = {}
         self._lock = threading.Lock()
 
-    def get_queue(self, task_id: str) -> queue.Queue:
+    def subscribe(self, task_id: str) -> queue.Queue:
+        q: queue.Queue = queue.Queue()
         with self._lock:
-            if task_id not in self.queues:
-                self.queues[task_id] = queue.Queue()
-            return self.queues[task_id]
+            self.subscribers.setdefault(task_id, []).append(q)
+        return q
+
+    def unsubscribe(self, task_id: str, q: queue.Queue):
+        with self._lock:
+            qs = self.subscribers.get(task_id)
+            if not qs:
+                return
+            if q in qs:
+                qs.remove(q)
+            if not qs:
+                self.subscribers.pop(task_id, None)
 
     def broadcast_sync(self, task_id: str, data: dict):
         with self._lock:
-            q = self.queues.get(task_id)
-        if q:
+            qs = list(self.subscribers.get(task_id, ()))
+        for q in qs:
             q.put(data)
 
     def set_process(self, task_id: str, process: subprocess.Popen):
@@ -211,8 +244,10 @@ class TaskRegistry:
             return self.processes.get(task_id)
 
     def cleanup(self, task_id: str):
+        # An toàn khi gọi ngay sau sự kiện cuối: mỗi subscriber giữ tham chiếu
+        # hàng đợi của chính nó, sự kiện đã nằm trong đó và vẫn rút ra được.
         with self._lock:
-            self.queues.pop(task_id, None)
+            self.subscribers.pop(task_id, None)
             self.processes.pop(task_id, None)
 
 registry = TaskRegistry()
@@ -224,6 +259,7 @@ class DownloadRequest(BaseModel):
     concurrency: int = 4
     output_dir: Optional[str] = None
     format_id: Optional[str] = None
+    source: Optional[Literal["cli", "desktop", "extension", "unknown"]] = None
 
 
 class VideoInfoPayload(BaseModel):
@@ -271,7 +307,10 @@ def run_download_task(task_id: str, req: DownloadRequest):
             # line, before postprocessing) get overwritten by this one
             # since it always fires last.
             avg_speed = data.get("speed") if data.get("status") == "completed" else None
-            history.update_task(task_id, status="downloading", progress=data["completed"], avg_speed=avg_speed)
+            # update_progress, KHÔNG phải update_task: một dòng tiến trình không
+            # được phép kéo task ra khỏi trạng thái người dùng vừa đặt (paused,
+            # cancelling). Xem HistoryService.update_progress.
+            history.update_progress(task_id, data["completed"], avg_speed=avg_speed)
 
     def process_callback(process: subprocess.Popen):
         registry.set_process(task_id, process)
@@ -287,6 +326,7 @@ def run_download_task(task_id: str, req: DownloadRequest):
                 progress_callback=progress_callback,
                 task_id=task_id,
                 process_callback=process_callback,
+                source=req.source or "unknown",
             )
         finally:
             # process_url doesn't push a terminal SSE event on failure/cancel
@@ -315,7 +355,10 @@ def run_prepared_task(task_id: str, req: PreparedDownloadRequest):
         registry.broadcast_sync(task_id, data)
         if "completed" in data:
             avg_speed = data.get("speed") if data.get("status") == "completed" else None
-            history.update_task(task_id, status="downloading", progress=data["completed"], avg_speed=avg_speed)
+            # update_progress, KHÔNG phải update_task: một dòng tiến trình không
+            # được phép kéo task ra khỏi trạng thái người dùng vừa đặt (paused,
+            # cancelling). Xem HistoryService.update_progress.
+            history.update_progress(task_id, data["completed"], avg_speed=avg_speed)
 
     def process_callback(process: subprocess.Popen):
         registry.set_process(task_id, process)
@@ -331,6 +374,7 @@ def run_prepared_task(task_id: str, req: PreparedDownloadRequest):
                 progress_callback=progress_callback,
                 task_id=task_id,
                 process_callback=process_callback,
+                source="extension",
             )
         finally:
             final_task = history.get_task(task_id)
@@ -354,7 +398,7 @@ async def start_download(req: DownloadRequest, background_tasks: BackgroundTasks
 
     # Write the task record up front so a status/history lookup right after
     # this call (or a server restart mid-download) has something to find.
-    history.create_task(task_id, req.url)
+    history.create_task(task_id, req.url, source=req.source or "unknown")
 
     background_tasks.add_task(run_download_task, task_id, req)
 
@@ -379,13 +423,24 @@ async def start_prepared_download(req: PreparedDownloadRequest, background_tasks
     manifest thì gửi URL trần sang đó để app dùng đường headless như cũ.
     """
     task_id = str(uuid.uuid4())
-    history.create_task(task_id, req.video_info.page_url)
+    history.create_task(task_id, req.video_info.page_url, source="extension")
     background_tasks.add_task(run_prepared_task, task_id, req)
     return {
         "task_id": task_id,
         "message": "Download started",
         "stream_token": issue_stream_token(task_id),
     }
+
+
+@app.get("/api/v1/downloads/active", dependencies=[Depends(verify_api_key)])
+def get_active_downloads():
+    """
+    Mọi task chưa kết thúc, gồm cả `paused`.
+
+    Nguồn sự thật cho "đang có gì chạy". Client dựng lại trạng thái từ đây sau
+    khi khởi động lại thay vì tự nhớ — xem spec D1 và D6.
+    """
+    return {"tasks": history.get_active_tasks()}
 
 
 @app.get("/api/v1/downloads/{task_id}", dependencies=[Depends(verify_api_key)])
@@ -416,8 +471,10 @@ def cancel_download(task_id: str):
         # acted on, until the process resumes — so a cancel on a paused task
         # would otherwise hang forever. SIGCONT first is a harmless no-op if
         # the process wasn't paused.
-        process.send_signal(signal.SIGCONT)
-        process.terminate()
+        # Cả NHÓM, không riêng yt-dlp: ffmpeg mới là tiến trình kéo byte, giết
+        # mỗi yt-dlp thì ffmpeg thành mồ côi và vẫn tải tiếp.
+        signal_tree(process, signal.SIGCONT)
+        signal_tree(process, signal.SIGTERM)
 
     return {"task_id": task_id, "message": "Cancellation requested"}
 
@@ -442,7 +499,7 @@ def pause_download(task_id: str):
     if not process or process.poll() is not None:
         raise HTTPException(status_code=409, detail="No running process for this task yet")
 
-    process.send_signal(signal.SIGSTOP)
+    signal_tree(process, signal.SIGSTOP)
     history.update_task(task_id, status="paused")
     # The download loop is a blocking `for line in process.stdout` read —
     # while paused, no new line arrives, so the frontend won't hear about
@@ -466,7 +523,7 @@ def resume_download(task_id: str):
     if not process or process.poll() is not None:
         raise HTTPException(status_code=409, detail="Paused process is no longer available — cancel and restart the download")
 
-    process.send_signal(signal.SIGCONT)
+    signal_tree(process, signal.SIGCONT)
     history.update_task(task_id, status="downloading")
     registry.broadcast_sync(task_id, {
         "status": "downloading", "description": "Downloading",
@@ -502,11 +559,13 @@ async def stream_progress(
     x_streamloot_extension_id: Optional[str] = Header(default=None),
 ):
     """
-    Nhận HAI cách xác thực, vì hai loại client có khả năng khác nhau:
+    Nhận BA cách xác thực, vì các loại client có khả năng khác nhau:
 
     - `Authorization: Bearer <API_KEY>` — cho client gọi bằng `fetch`. MV3
       service worker KHÔNG có `EventSource`, nên extension buộc phải dùng
       `fetch` + `ReadableStream`, và `fetch` thì set được header bình thường.
+    - `X-Streamloot-Extension-Id` — extension, cùng cơ chế như mọi endpoint
+      khác (xem `verify_client`).
     - `?token=` dùng-một-lần — cho client dùng `EventSource` (desktop UI), vì
       `EventSource` không set được header.
 
@@ -519,29 +578,73 @@ async def stream_progress(
         pass
     elif x_streamloot_extension_id and x_streamloot_extension_id in _extension_ids:
         pass  # extension: cùng cơ chế như mọi endpoint khác (xem verify_client)
-    elif origin and origin in _extension_origins:
-        pass
     elif not consume_stream_token(task_id, token):
+        # Ghi lại manh mối trước khi từ chối: một lần 401 không dấu vết ở đúng
+        # đường này từng tốn ba vòng gỡ lỗi mới tìm ra nguyên nhân là
+        # `Origin: None`. Không log secret, chỉ log có/không và origin nhận được.
+        Logger.error(
+            f"Từ chối stream task {task_id}: "
+            f"Bearer={'có' if authorization else 'không'}, "
+            f"ext-id={x_streamloot_extension_id!r}, "
+            f"token={'có' if token else 'không'}, Origin={origin!r}"
+        )
         raise HTTPException(status_code=401, detail="Invalid or missing stream credentials")
-    q = registry.get_queue(task_id)
+    q = registry.subscribe(task_id)
 
     async def event_generator():
-        while True:
-            try:
-                # Use to_thread to prevent blocking the async event loop
-                data = await asyncio.to_thread(q.get, timeout=1.0)
-                yield {"data": json.dumps(data)}
-                if data.get("status") in ["completed", "failed", "cancelled"]:
-                    break
-            except queue.Empty:
-                continue
+        try:
+            while True:
+                try:
+                    # Use to_thread to prevent blocking the async event loop
+                    data = await asyncio.to_thread(q.get, timeout=1.0)
+                    yield {"data": json.dumps(data)}
+                    if data.get("status") in ["completed", "failed", "cancelled"]:
+                        break
+                except queue.Empty:
+                    continue
+        finally:
+            # Client ngắt giữa chừng thì generator bị đóng ở đây — không gỡ ra
+            # là hàng đợi mồ côi cứ lớn mãi theo mỗi sự kiện phát ra.
+            registry.unsubscribe(task_id, q)
 
     return EventSourceResponse(event_generator())
 
 
+class ProbeDurationRequest(BaseModel):
+    url: str
+    referer: Optional[str] = None
+    user_agent: Optional[str] = None
+
+
+@app.post("/api/v1/probe/duration", dependencies=[Depends(verify_api_key)])
+def probe_manifest_duration(req: ProbeDurationRequest):
+    """
+    Đo thời lượng một playlist, để client biết cái nào là phim cái nào là quảng cáo.
+
+    Extension không tự đo được: `fetch` của trình duyệt không cho đặt `Referer`
+    (header bị cấm), mà CDN video thường từ chối request thiếu Referer — đo thật
+    thì phép đo treo tới hết giờ rồi trả về tay không. Ở đây thì đặt được.
+    """
+    return {"duration_sec": probe_duration(req.url, req.referer, req.user_agent)}
+
+
+@app.get("/api/v1/health", dependencies=[Depends(verify_api_key)])
+def health_check():
+    """
+    Kiểm tra còn sống, KHÔNG đụng database.
+
+    Extension trước đây hỏi `/history` để biết app có chạy không — tức là kéo 50
+    dòng lịch sử (vài KB, một lượt truy vấn SQLite) chỉ để trả lời câu hỏi
+    có/không. Endpoint này không đọc gì cả, nên câu trả lời không bao giờ phụ
+    thuộc vào việc DB đang bận hay lịch sử dài bao nhiêu.
+    """
+    return {"ok": True}
+
+
 @app.get("/api/v1/history", dependencies=[Depends(verify_api_key)])
-def get_history():
-    return history.get_history(limit=50)
+def get_history(source: Optional[Literal["cli", "desktop", "extension", "unknown"]] = None):
+    # source=None trả mọi nguồn — cửa sổ app dùng thế (D6).
+    return history.get_history(limit=50, source=source)
 
 
 @app.delete("/api/v1/history/{record_id}", dependencies=[Depends(verify_api_key)])

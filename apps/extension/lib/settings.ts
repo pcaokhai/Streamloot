@@ -8,9 +8,10 @@ export interface Settings {
 }
 
 export const DEFAULTS: Settings = {
-  // Không có apiKey: backend tin extension này qua header `Origin` khớp ID đã
-  // ghim trong manifest. Trình duyệt luôn tự đặt Origin và JS của trang không
-  // ghi đè được, nên trang web độc hại không mạo danh được extension.
+  // Không có apiKey: backend nhận diện extension qua header
+  // `X-Streamloot-Extension-Id` khớp ID đã ghim trong manifest. (Đường qua
+  // `Origin` đã bỏ — Chrome KHÔNG gửi Origin khi extension có host_permissions
+  // cho host đó, đo được là backend nhận `Origin: None`.)
   // Trùng DESKTOP_PORT ở apps/desktop/main.py.
   port: 8001,
   // B10 — yt-dlp đã nhận -N từ trước (ADR 0005 §6.2.3), chỉ thiếu chỗ chỉnh.

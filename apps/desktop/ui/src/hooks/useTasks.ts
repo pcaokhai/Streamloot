@@ -2,28 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import { TERMINAL_STATUSES, type ProgressEvent, type Task } from "../types";
 
-const STORAGE_KEY = "downloader.activeTaskIds";
-
-function loadStoredTaskIds(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]") as string[];
-  } catch {
-    return [];
-  }
-}
-
-function saveStoredTaskIds(ids: string[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
-}
-
 export function useTasks() {
   const [tasks, setTasks] = useState<Record<string, Task>>({});
   const streamsRef = useRef<Map<string, EventSource>>(new Map());
-  // Guards the persist-effect below from firing on the very first mount
-  // render (tasks = {}) before the rehydration effect has read the
-  // stored id list — without this, the persist-effect wins the race and
-  // overwrites the stored list with [] before rehydration ever sees it.
-  const hydratedRef = useRef(false);
 
   const patchTask = useCallback((taskId: string, patch: Partial<Task>) => {
     setTasks((prev) => {
@@ -59,52 +40,84 @@ export function useTasks() {
     streamsRef.current.set(taskId, es);
   }, [patchTask]);
 
-  // Persist the active task-id list whenever the set of known tasks changes
-  // (not on every field update) so a relaunch can rehydrate live progress.
-  // Skipped until the rehydration effect below has run once — see hydratedRef.
-  useEffect(() => {
-    if (!hydratedRef.current) return;
-    saveStoredTaskIds(Object.keys(tasks));
-  }, [tasks]);
+  const hydrate = useCallback(async () => {
+    let res;
+    try {
+      res = await api.getActiveTasks();
+    } catch (err) {
+      // request() ném khi backend trả lỗi. Không bắt ở đây thì promise bị từ
+      // chối lặng lẽ và hydrate chết giữa chừng — cửa sổ trống trơn mà console
+      // là nơi duy nhất biết chuyện.
+      console.error("Không lấy được danh sách task đang chạy:", err);
+      return;
+    }
+    if (!res) return;
+    // MERGE với state hiện có, không thay hoàn toàn: hydrate() chạy lại mỗi lần
+    // cửa sổ được show (streamloot:refresh), và snapshot REST không mang theo
+    // formatId (client chọn lúc bấm tải, server không lưu/trả lại field này).
+    // Ghi đè toàn bộ như trước sẽ xoá mất formatId của mọi task đang chạy mỗi
+    // lần ẩn/hiện cửa sổ, khiến nút Retry sau đó âm thầm mất lựa chọn chất
+    // lượng — đây là field client sở hữu, phải giữ nguyên qua các lần hydrate.
+    await Promise.all(res.tasks.map(async (t) => {
+      setTasks((prev) => {
+        const existing = prev[t.task_id];
+        return {
+          ...prev,
+          [t.task_id]: {
+            ...existing,
+            formatId: existing?.formatId ?? null,
+            url: t.url,
+            title: t.title,
+            status: t.status,
+            completed: t.progress,
+            speed: t.avg_speed ?? "--",
+            outputPath: t.output_path,
+          },
+        };
+      });
+      // Đang stream rồi thì thôi: attachStream sẽ no-op, nên xin token chỉ tổ
+      // cấp ra rồi vứt đi (token là dùng-một-lần).
+      if (streamsRef.current.has(t.task_id)) return;
+      // Task này có thể do extension hoặc CLI khởi động, nên ta không có token.
+      // Xin một cái mới — cơ chế đã có sẵn cho đường khôi phục sau khi mở lại app.
+      try {
+        const tok = await api.refreshStreamToken(t.task_id);
+        if (tok?.stream_token) attachStream(t.task_id, tok.stream_token);
+      } catch {
+        // 404 (task biến mất) hay 409 (đã ở trạng thái cuối) giữa lúc lấy
+        // snapshot và lúc xin token — snapshot vừa set ở trên đã đủ chính xác,
+        // không cần stream nữa.
+      }
+    }));
+  }, [attachStream]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const storedIds = loadStoredTaskIds();
-      for (const taskId of storedIds) {
-        try {
-          const t = await api.getTask(taskId);
-          if (!t || cancelled) continue;
-          setTasks((prev) => ({
-            ...prev,
-            [taskId]: {
-              url: t.url,
-              title: t.title,
-              status: t.status,
-              completed: t.progress,
-              speed: t.avg_speed ?? "--",
-              formatId: null,
-              outputPath: t.output_path,
-            },
-          }));
-          if (!TERMINAL_STATUSES.has(t.status)) {
-            // Token cũ đã bị tiêu thụ ở phiên trước — phải xin cái mới.
-            void api.refreshStreamToken(taskId).then((r) => {
-              if (r?.stream_token) attachStream(taskId, r.stream_token);
-            });
-          }
-        } catch {
-          // Task no longer exists server-side (e.g. db reset) — drop it silently.
-        }
-      }
-      if (!cancelled) hydratedRef.current = true;
-    })();
-    return () => {
-      cancelled = true;
+    void hydrate();
+  }, [hydrate]);
+
+  useEffect(() => {
+    const onRefresh = () => void hydrate();
+    window.addEventListener("streamloot:refresh", onRefresh);
+    return () => window.removeEventListener("streamloot:refresh", onRefresh);
+  }, [hydrate]);
+
+  // Hỏi lại định kỳ danh sách task đang chạy.
+  //
+  // Không có cái này thì cửa sổ chỉ biết những task nó tự khởi động, cộng với
+  // một lần chụp ảnh lúc mở. Người dùng bấm tải từ EXTENSION trong khi cửa sổ
+  // đang mở thì không có gì kích hoạt hydrate — task chạy xong từ đời nào cửa
+  // sổ vẫn trống (D6 yêu cầu thấy được mọi nguồn). SSE chỉ đẩy tiến trình của
+  // task ta đã biết, nó không báo "có task MỚI".
+  //
+  // Gọi localhost mỗi 2s là rẻ; dừng khi cửa sổ bị ẩn để không chạy vô ích.
+  useEffect(() => {
+    const tick = () => {
+      if (document.hidden) return;
+      void hydrate();
     };
-    // Runs once on mount — attachStream/patchTask are stable via useCallback.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const id = window.setInterval(tick, 2000);
+    return () => window.clearInterval(id);
+  }, [hydrate]);
 
   const beginDownload = useCallback(async (url: string, formatId: string | null, title: string | null) => {
     const result = await api.startDownload(url, formatId);

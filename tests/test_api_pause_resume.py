@@ -4,7 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("API_KEY", "test-key")
 
@@ -102,8 +102,59 @@ class TestApiPauseResumeEndpoints(unittest.TestCase):
 
         api_main.cancel_download("t7")
 
-        process.send_signal.assert_called_once_with(signal.SIGCONT)
-        process.terminate.assert_called_once()
+        # Đi qua signal_tree nên với process giả (không có nhóm riêng) nó lùi về
+        # send_signal. Điều PHẢI giữ là thứ tự: CONT trước, TERM sau.
+        sent = [c.args[0] for c in process.send_signal.call_args_list]
+        self.assertEqual(sent, [signal.SIGCONT, signal.SIGTERM])
+
+    def test_cancel_signals_the_whole_process_group(self):
+        """
+        yt-dlp giao việc tải cho ffmpeg, nên tiến trình kéo byte là CHÁU. Huỷ mà
+        chỉ giết yt-dlp thì ffmpeg thành mồ côi và vẫn ghi file tiếp.
+        """
+        api_main.history.create_task("t8", "https://example.com")
+        process = _running_process()
+        api_main.registry.set_process("t8", process)
+
+        with patch("utils.proc.os.getpgid", side_effect=lambda pid: 4242 if pid else 1), \
+             patch("utils.proc.os.killpg") as killpg:
+            api_main.cancel_download("t8")
+
+        self.assertEqual([c.args for c in killpg.call_args_list],
+                         [(4242, signal.SIGCONT), (4242, signal.SIGTERM)])
+        # Đã bắn vào cả nhóm thì không gửi riêng cho tiến trình con nữa.
+        process.send_signal.assert_not_called()
+
+    def test_pause_signals_the_whole_process_group(self):
+        """
+        Đúng lỗi người dùng gặp: menu báo "đã tạm dừng" mà video vẫn tải tiếp,
+        vì SIGSTOP chỉ tới yt-dlp còn ffmpeg (tiến trình cháu) chạy tiếp.
+        """
+        api_main.history.create_task("t9", "https://example.com")
+        api_main.history.update_task("t9", status="downloading")
+        process = _running_process()
+        api_main.registry.set_process("t9", process)
+
+        with patch("utils.proc.os.getpgid", side_effect=lambda pid: 777 if pid else 1), \
+             patch("utils.proc.os.killpg") as killpg:
+            api_main.pause_download("t9")
+
+        killpg.assert_called_once_with(777, signal.SIGSTOP)
+        process.send_signal.assert_not_called()
+
+    def test_resume_signals_the_whole_process_group(self):
+        api_main.history.create_task("t10", "https://example.com")
+        api_main.history.update_task("t10", status="paused")
+        process = _running_process()
+        api_main.registry.set_process("t10", process)
+
+        with patch("utils.proc.os.getpgid", side_effect=lambda pid: 778 if pid else 1), \
+             patch("utils.proc.os.killpg") as killpg:
+            api_main.resume_download("t10")
+
+        killpg.assert_called_once_with(778, signal.SIGCONT)
+        process.send_signal.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

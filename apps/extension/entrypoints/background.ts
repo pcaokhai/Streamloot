@@ -45,6 +45,17 @@ async function addCapture(tabId: number, cap: Capture): Promise<void> {
   browser.tabs.sendMessage(tabId, { type: 'captures', captures: next }).catch(() => {
     // Content script chưa nạp trên trang này — bỏ qua, nó sẽ tự hỏi lúc nạp.
   });
+
+  // Đo thời lượng ở nền rồi báo lại: panel hiện ngay, không đợi phép đo. Đo xong
+  // mới biết cái nào là phim, cái nào là quảng cáo.
+  void api.probeDuration(cap.url, cap.referer, cap.userAgent).then(async (durationSec) => {
+    const list = await getCaptures(tabId);
+    const i = list.findIndex((c) => c.url === cap.url);
+    if (i < 0) return; // tab đã chuyển trang trong lúc đo
+    list[i] = { ...list[i], durationSec };
+    await browser.storage.session.set({ [keyFor(tabId)]: list });
+    browser.tabs.sendMessage(tabId, { type: 'captures', captures: list }).catch(() => {});
+  });
 }
 
 async function clearTab(tabId: number): Promise<void> {

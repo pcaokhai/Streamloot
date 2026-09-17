@@ -82,6 +82,50 @@ class TestPreparedDownload(unittest.TestCase):
         dl.assert_called_once()
         get_extractor.assert_not_called()
 
+    def test_source_flows_through_to_history(self):
+        """Nguồn phải đi hết đường từ lời gọi tới bản ghi lịch sử."""
+        from services.download_service import DownloadService
+
+        svc = DownloadService()
+        vi = api_main.VideoInfoPayload(**PAYLOAD).to_video_info()
+        with patch.object(svc.downloader, "download", return_value="/tmp/out.mp4"), \
+             patch("services.download_service.sync_archive_with_disk"), \
+             patch("services.download_service.is_video_on_disk", return_value=False), \
+             patch.object(svc.history, "save_record") as save:
+            svc.process_video_infos([vi], interactive=False, source="extension")
+
+        self.assertEqual(save.call_args.kwargs["source"], "extension")
+
+    def test_source_flows_through_playlist_branch(self):
+        """Playlist branch (multiple videos) phải truyền source tới save_record."""
+        from services.download_service import DownloadService
+        from core.models import VideoInfo
+
+        svc = DownloadService()
+        # Build playlist: >1 video with same playlist_name triggers playlist branch
+        vi1 = VideoInfo(
+            title="Video 1",
+            m3u8_url="https://cdn.example.com/v1.m3u8",
+            page_url="https://example.com/watch/1",
+            playlist_name="My Playlist",
+        )
+        vi2 = VideoInfo(
+            title="Video 2",
+            m3u8_url="https://cdn.example.com/v2.m3u8",
+            page_url="https://example.com/watch/2",
+            playlist_name="My Playlist",
+        )
+        with patch.object(svc.downloader, "download", return_value="/tmp/out.mp4"), \
+             patch("services.download_service.sync_archive_with_disk"), \
+             patch("services.download_service.is_video_on_disk", return_value=False), \
+             patch.object(svc.history, "save_record") as save:
+            svc.process_video_infos([vi1, vi2], interactive=False, source="cli")
+
+        # Playlist branch iterates over each video: expect 2 calls, both with source="cli"
+        self.assertEqual(save.call_count, 2)
+        for call in save.call_args_list:
+            self.assertEqual(call.kwargs["source"], "cli")
+
 
 class TestStreamToken(unittest.TestCase):
     """B13 — siết xác thực cho luồng SSE."""
@@ -177,9 +221,17 @@ class TestOriginAuth(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.status_code, 401)
 
-    def test_official_extension_origin_is_accepted(self):
-        """Đường dự phòng, giữ phòng khi Chrome đổi hành vi."""
-        self.assertEqual(api_main.verify_client(credentials=None, origin=self.OFFICIAL), "extension")
+    def test_origin_alone_is_no_longer_accepted(self):
+        """
+        Extension có host_permissions nên Chrome KHÔNG gửi Origin (đo được:
+        backend nhận Origin None). Giữ nhánh này chỉ gây hiểu nhầm là nó có
+        tác dụng.
+        """
+        with self.assertRaises(HTTPException) as ctx:
+            api_main.verify_client(
+                credentials=None, origin=self.OFFICIAL, x_streamloot_extension_id=None
+            )
+        self.assertEqual(ctx.exception.status_code, 401)
 
     def test_valid_api_key_still_accepted(self):
         from fastapi.security import HTTPAuthorizationCredentials
@@ -215,12 +267,6 @@ class TestOriginAuth(unittest.TestCase):
         res = run(api_main.stream_progress(
             "task-hdr", token=None, authorization=None, origin=None,
             x_streamloot_extension_id=self.OFFICIAL_ID,
-        ))
-        self.assertIsNotNone(res)
-
-    def test_stream_accepts_official_origin(self):
-        res = run(api_main.stream_progress(
-            "task-origin", token=None, authorization=None, origin=self.OFFICIAL
         ))
         self.assertIsNotNone(res)
 

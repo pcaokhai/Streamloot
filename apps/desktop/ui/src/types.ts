@@ -31,6 +31,7 @@ export interface TaskRecord {
   output_path: string | null;
   error_msg: string | null;
   avg_speed: string | null;
+  source: string;
   created_at: string;
   updated_at: string;
 }
@@ -56,6 +57,7 @@ export interface HistoryRow {
   output_path: string | null;
   playlist_name: string | null;
   created_at: string;
+  source?: string;
 }
 
 export interface FormatInfo {

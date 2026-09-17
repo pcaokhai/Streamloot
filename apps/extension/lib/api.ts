@@ -71,7 +71,16 @@ export type Health = 'ok' | 'unreachable' | 'rejected';
 export async function health(): Promise<Health> {
   let res: Response;
   try {
-    res = await fetch(`${await baseUrl()}/history`, { headers: jsonHeaders() });
+    // Có hạn giờ, vì `fetch` không tự bỏ cuộc bao giờ.
+    //
+    // Backend nằm ở localhost nên bình thường trả lời trong vài mili giây. Nếu
+    // cổng có người nghe nhưng không phải Streamloot (hay tiến trình đang kẹt),
+    // fetch treo vô hạn và popup đứng ở "Đang kiểm tra…" mãi mãi — người dùng
+    // đọc được đúng con số không. Quá hạn thì coi như không gọi được.
+    res = await fetch(`${await baseUrl()}/health`, {
+      headers: jsonHeaders(),
+      signal: AbortSignal.timeout(4000),
+    });
   } catch {
     return 'unreachable';
   }
@@ -150,5 +159,45 @@ export async function streamProgress(
         // Khung hỏng thì bỏ qua, đừng giết cả stream vì một sự kiện lỗi.
       }
     }
+  }
+}
+
+/**
+ * Nhờ backend đo thời lượng một playlist.
+ *
+ * Không tự `fetch` trong extension: trình duyệt cấm đặt `Referer`, mà CDN video
+ * thường từ chối request thiếu nó — đo tại chỗ thì treo tới hết giờ rồi trả về
+ * tay không, và panel hiện "đang đo…" vĩnh viễn. Python đặt được header đó.
+ *
+ * Trả `null` khi không đo được. KHÔNG ném: đây là tín hiệu phụ để xếp hạng,
+ * hỏng nó không được phép làm hỏng việc bắt stream.
+ */
+export async function probeDuration(
+  url: string,
+  referer?: string,
+  userAgent?: string,
+): Promise<number | null> {
+  try {
+    const r = await post<{ duration_sec: number | null }>('/probe/duration', {
+      url,
+      referer: referer ?? null,
+      user_agent: userAgent ?? null,
+    });
+    return r.duration_sec;
+  } catch (err) {
+    // Ghi ra lý do thay vì nuốt trọn. "App cũ chưa có endpoint này" (404) và
+    // "CDN từ chối manifest" đều ra `null`, nhưng cách sửa hoàn toàn khác nhau:
+    // một bên build lại app, một bên đổi tín hiệu xếp hạng. Gộp hai thứ đó làm
+    // một là bắt người dùng đoán.
+    const status = err instanceof BackendError ? err.status : undefined;
+    if (status === 404) {
+      console.warn(
+        '[Streamloot] App đang chạy chưa có /probe/duration — build lại app (./build_app.sh). ' +
+          'Không đo được thời lượng thì panel phải đoán khi một trang có nhiều stream.',
+      );
+    } else {
+      console.warn('[Streamloot] Đo thời lượng hỏng:', status ?? err);
+    }
+    return null;
   }
 }

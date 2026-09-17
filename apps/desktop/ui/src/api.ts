@@ -85,7 +85,9 @@ export interface StartDownloadResult {
 }
 
 export function startDownload(url: string, formatId: string | null): Promise<StartDownloadResult | null> {
-  const body: { url: string; format_id?: string } = { url };
+  // §6.2: mỗi surface tự khai nguồn, nếu không cột Source trống với mọi thứ
+  // người dùng bấm từ chính app.
+  const body: { url: string; source: string; format_id?: string } = { url, source: "desktop" };
   if (formatId) body.format_id = formatId;
   return request<StartDownloadResult>("/downloads", { method: "POST", body: JSON.stringify(body) });
 }
@@ -112,6 +114,15 @@ export function pauseTask(taskId: string): Promise<unknown> {
 
 export function resumeTask(taskId: string): Promise<unknown> {
   return request(`/downloads/${taskId}/resume`, { method: "POST" });
+}
+
+/**
+ * Mọi task chưa kết thúc, bất kể nguồn nào khởi động — cửa sổ app, extension
+ * hay CLI. Thay hoàn toàn cho việc tự nhớ danh sách task id trong localStorage:
+ * backend đã biết, client chỉ phản chiếu.
+ */
+export function getActiveTasks(): Promise<{ tasks: TaskRecord[] } | null> {
+  return request<{ tasks: TaskRecord[] }>("/downloads/active");
 }
 
 export function getHistory(): Promise<HistoryRow[] | null> {

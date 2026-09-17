@@ -13,10 +13,14 @@ async function render() {
 
   // B6 — ba trạng thái, không phải hai. "App chưa chạy" và "app từ chối" sửa
   // theo hai cách hoàn toàn khác nhau; gộp lại là chỉ sai đường cho người dùng.
+  // Đo thời gian thật và hiện ra: "kết nối lâu" mà không có con số thì không ai
+  // biết lâu ở đâu — chờ backend, hay chờ chính extension khởi động lại.
+  const t0 = performance.now();
   const state = await api.health();
+  const ms = Math.round(performance.now() - t0);
   if (state === 'ok') {
     status.innerHTML = '<span class="dot on"></span>Đã kết nối';
-    hint.textContent = `Backend 127.0.0.1:${port}`;
+    hint.textContent = `Backend 127.0.0.1:${port} · ${ms}ms`;
   } else if (state === 'unreachable') {
     status.innerHTML = '<span class="dot off"></span>App chưa chạy';
     hint.textContent = `Không gọi được 127.0.0.1:${port}. Mở app Streamloot — kiểm tra icon ⤓ trên menu bar.`;
@@ -38,4 +42,13 @@ document.getElementById('opts')!.addEventListener('click', () => {
   void browser.runtime.openOptionsPage();
 });
 
-void render();
+// render() không bọc lỗi thì mọi exception (storage hỏng, bridge chưa sẵn
+// sàng, JSON lỗi) đều để popup nằm nguyên ở "Đang kiểm tra…" — người dùng thấy
+// một cái popup treo và không có gì để báo lại. Hiện lỗi ra ngay trong popup.
+void render().catch((err) => {
+  const status = document.getElementById('status');
+  const hint = document.getElementById('hint');
+  if (status) status.innerHTML = '<span class="dot off"></span>Popup lỗi';
+  if (hint) hint.textContent = String(err?.message ?? err);
+  console.error('Streamloot popup:', err);
+});

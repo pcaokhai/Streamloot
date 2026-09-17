@@ -121,7 +121,8 @@ def main():
             output_dir=args.output,
             interactive=interactive_mode,
             format_id=args.format,
-            progress_callback=cli_progress_handler
+            progress_callback=cli_progress_handler,
+            source="cli",
         )
     
     if not success:
