@@ -293,8 +293,13 @@ export default defineContentScript({
     const existing = (await browser.runtime.sendMessage({ type: 'getCaptures' })) as Capture[];
     if (existing?.length) surface(existing);
 
+    // Panel là bề mặt xem thứ hai bên cạnh popup (spec §4.2 hàng 1) — nếu chỉ
+    // popup báo viewer thì mở mỗi panel vẫn poll ở nhịp 60s.
+    void browser.runtime.sendMessage({ type: 'viewerOpen' }).catch(() => {});
+
     ctx.onInvalidated(() => {
       onProgress = null;
+      void browser.runtime.sendMessage({ type: 'viewerClosed' }).catch(() => {});
     });
   },
 });
