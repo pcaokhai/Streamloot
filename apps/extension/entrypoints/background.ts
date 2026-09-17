@@ -14,6 +14,7 @@
 import * as api from '../lib/api';
 import { BackendError } from '../lib/api';
 import { applyIconState } from '../lib/icon';
+import { nextPollMs } from '../lib/tasks';
 import type { Capture, TaskRecord, VideoInfoPayload } from '../lib/types';
 
 const MANIFEST_URL = /\.(m3u8|mpd)(\?|$)/i;
@@ -204,6 +205,73 @@ export default defineBackground(() => {
       return api.health().then((state) => ({ state }));
     }
 
+    if (m?.type === 'viewerOpen') {
+      viewers += 1;
+      void tick(); // đổi sang nhịp 1s ngay, đừng đợi hết chu kỳ 60s
+      return Promise.resolve({ ok: true });
+    }
+    if (m?.type === 'viewerClosed') {
+      viewers = Math.max(0, viewers - 1);
+      return Promise.resolve({ ok: true });
+    }
+    if (m?.type === 'getTasks') {
+      return refreshTasks().then((tasks) => ({ ok: true, tasks }));
+    }
+
     return undefined;
   });
+
+  const ALARM = 'streamloot-poll';
+  /** Số bề mặt đang mở (popup, panel). Quyết định nhịp 1s hay 60s (spec §4.2). */
+  let viewers = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  async function refreshTasks(): Promise<TaskRecord[]> {
+    try {
+      const { tasks } = await api.getActiveTasks();
+      setLastKnownTasks(tasks);
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      const caps = tab?.id !== undefined ? await getCaptures(tab.id) : [];
+      await applyIconState(tasks, caps.length, tab?.id);
+      return tasks;
+    } catch {
+      // App tắt giữa chừng là chuyện bình thường. Giữ nhịp, lần sau gọi lại.
+      return [];
+    }
+  }
+
+  /**
+   * Đặt lịch lần poll kế tiếp.
+   *
+   * Hai cơ chế, cố ý: `setTimeout` cho nhịp 1s khi có người xem (chính xác, và
+   * lúc đó đã có tin nhắn giữ service worker sống), `chrome.alarms` cho nhịp 60s
+   * (setTimeout dài không sống nổi qua lần MV3 thu hồi worker). Hết task thì
+   * DỪNG cả hai — poll rỗng chính là cách giữ worker sống mà D4 loại bỏ.
+   */
+  function schedule(tasks: TaskRecord[]): void {
+    if (timer) { clearTimeout(timer); timer = null; }
+    const ms = nextPollMs({ viewersOpen: viewers > 0, hasActive: tasks.length > 0 });
+    if (ms === null) {
+      void browser.alarms.clear(ALARM);
+      return;
+    }
+    if (ms <= 5000) {
+      void browser.alarms.clear(ALARM);
+      timer = setTimeout(() => void tick(), ms);
+    } else {
+      void browser.alarms.create(ALARM, { periodInMinutes: ms / 60000 });
+    }
+  }
+
+  async function tick(): Promise<void> {
+    schedule(await refreshTasks());
+  }
+
+  browser.alarms.onAlarm.addListener((a) => {
+    if (a.name === ALARM) void tick();
+  });
+
+  // Task có thể đã chạy từ trước lần khởi động này (do app hoặc CLI bắt đầu, hoặc
+  // service worker vừa bị thu hồi) — hỏi backend một phát để dựng lại.
+  void tick();
 });
