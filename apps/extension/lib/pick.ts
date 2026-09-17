@@ -54,17 +54,23 @@ export function pickCapture(all: Capture[], ctx: PickContext): Capture | undefin
     if (close.length) return close.reduce((a, b) => (b.durationSec! > a.durationSec! ? b : a));
   }
 
-  const pending = list.some((c) => c.durationSec === undefined);
+  const unmeasured = list.filter((c) => c.durationSec === undefined);
   const longest = measured.length
     ? measured.reduce((a, b) => (b.durationSec! > a.durationSec! ? b : a))
     : undefined;
 
-  // 3. Chỉ có một cái ngắn ngủn mà những cái khác còn đang đo thì ĐỪNG chọn nó.
-  // Đây đúng là chỗ bản trước sai: đo xong mỗi quảng cáo 5 giây, và "cái đo được
-  // dài nhất" hoá ra là quảng cáo.
-  if (longest && longest.durationSec! < LIKELY_AD_SEC && pending) return undefined;
-  if (longest) return longest;
+  // 3. Đo được cái nào đủ dài thì lấy cái dài nhất.
+  if (longest && longest.durationSec! >= LIKELY_AD_SEC) return longest;
 
-  // 4. Chưa đo xong thì chưa quyết; đo xong mà không ra gì thì đành lấy cái cuối.
-  return pending ? undefined : list[list.length - 1];
+  // 4. Thứ đo được chỉ toàn ngắn ngủn (gần như chắc là quảng cáo): thà lấy một
+  // ứng viên CHƯA đo còn hơn lấy thứ đã biết là quảng cáo.
+  if (unmeasured.length) return unmeasured[unmeasured.length - 1];
+
+  // 5. Không bao giờ trả về "chưa chọn" khi danh sách còn ứng viên.
+  //
+  // Bản trước đợi đo xong mới quyết, và khi phép đo không bao giờ về thì panel
+  // treo ở "Đang xác định stream…" vĩnh viễn — đổi một lỗi chọn sai lấy một lỗi
+  // treo, tệ hơn. Lọc Referer ở bước 1 đã loại quảng cáo rồi, nên đoán ở đây là
+  // đoán trong nhóm đã sạch; người dùng vẫn đổi tay được.
+  return longest ?? list[list.length - 1];
 }

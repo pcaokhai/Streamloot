@@ -8,8 +8,8 @@ const t=(name, got, want)=>{ const ok=got===want; ok?pass++:fail++; console.log(
 const ad  = mk('ads-network.test', 5, 'https://ads.example.net/frame');
 const f1  = mk('cdn-content.test', undefined, 'https://example-site.test/watch/1');
 const f2  = mk('cdn-content.test', undefined, 'https://example-site.test/watch/1');
-t('không chọn quảng cáo khi phim còn đang đo',
-  pickCapture([ad,f1,f2], {pageHost:PAGE}), undefined);
+t('không chọn quảng cáo khi phim còn đang đo (chọn ứng viên đúng trang)',
+  pickCapture([ad,f1,f2], {pageHost:PAGE})?.host, 'cdn-content.test');
 
 // Đo xong: phim dài 1:04:44 = 3884s
 const film = {...f1, durationSec:3884};
@@ -23,7 +23,13 @@ t('khớp thời lượng trang',
 
 // Referer loại quảng cáo ngay cả khi quảng cáo là cái duy nhất đo được
 t('referer loại quảng cáo dù nó đo xong trước',
-  pickCapture([ad,f1], {pageHost:PAGE}), undefined);
+  pickCapture([ad,f1], {pageHost:PAGE})?.host, 'cdn-content.test');
+
+// Không bao giờ treo: còn ứng viên thì phải chọn được một cái.
+t('không treo khi phép đo không bao giờ về',
+  pickCapture([f1,f2], {pageHost:PAGE}) !== undefined, true);
+t('không treo kể cả khi không có referer lẫn thời lượng',
+  pickCapture([mk('x.com',undefined,undefined)], {pageHost:PAGE}) !== undefined, true);
 
 // Người dùng tự chọn thì tôn trọng, kể cả chọn quảng cáo
 t('tôn trọng lựa chọn tay',

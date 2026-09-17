@@ -118,16 +118,9 @@ export default defineContentScript({
         pageDurationSec: pageDuration(),
         chosenUrl,
       });
-      if (!cap) {
-        // Chưa đủ cơ sở để chọn. Nói ra điều đó thay vì im lặng hiện panel rỗng
-        // hoặc lặng lẽ chọn nhầm quảng cáo.
-        root.innerHTML = '';
-        const wait = document.createElement('div');
-        wait.className = 'sl-sub';
-        wait.textContent = `Đang xác định stream… (${captures.length} ứng viên)`;
-        root.append(wait);
-        return;
-      }
+      // pickCapture chỉ trả rỗng khi KHÔNG còn ứng viên nào — nó không bao giờ
+      // bắt panel đợi một phép đo (xem lib/pick.ts bước 5).
+      if (!cap) return;
 
       root.innerHTML = '';
       const head = document.createElement('div');
