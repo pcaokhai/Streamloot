@@ -57,17 +57,20 @@ export function iconKey(t: TaskRecord | undefined): string {
  * Badge BỔ SUNG cho vòng chứ không lặp lại nó (spec §5.3).
  *
  * Đúng một download thì badge để trống — vòng đã nói rồi. Số stream là theo
- * tab, số download là toàn cục (D2).
+ * tab (`perTab: true`), số download là toàn cục theo D2 (`perTab: false`) —
+ * đây là quyết định, không phải chi tiết vẽ, nên nằm ở đây để test được thay
+ * vì suy luận từ việc có truyền `tabId` hay không ở lib/icon.ts.
  */
 export function badgeFor(
   tasks: TaskRecord[],
   tabCaptureCount: number,
-): { text: string; color: string } {
+): { text: string; color: string; perTab: boolean } {
   const live = tasks.filter((t) => !TERMINAL_STATUSES.has(t.status));
-  if (live.length > 1) return { text: String(live.length), color: BADGE_BLUE };
-  if (live.length === 1) return { text: '', color: BADGE_BLUE };
-  if (tabCaptureCount > 0) return { text: String(tabCaptureCount), color: BADGE_GRAY };
-  return { text: '', color: BADGE_GRAY };
+  if (live.length > 1) return { text: String(live.length), color: BADGE_BLUE, perTab: false };
+  if (live.length === 1) return { text: '', color: BADGE_BLUE, perTab: false };
+  if (tabCaptureCount > 0) return { text: String(tabCaptureCount), color: BADGE_GRAY, perTab: true };
+  // Rỗng: perTab false để badge toàn cục cũ (nếu có) được xoá đi.
+  return { text: '', color: BADGE_GRAY, perTab: false };
 }
 
 /**
@@ -79,4 +82,30 @@ export function badgeFor(
 export function nextPollMs(o: { viewersOpen: boolean; hasActive: boolean }): number | null {
   if (!o.hasActive) return null;
   return o.viewersOpen ? 1000 : 60000;
+}
+
+/**
+ * Thời gian tương đối cho một dòng lịch sử (spec §5.2), kiểu "2 phút trước".
+ *
+ * `created_at` từ SQLite không có múi giờ trong chuỗi — coi là UTC (backend
+ * ghi bằng `datetime('now')`, luôn UTC) rồi so với giờ hiện tại của máy.
+ * Chuỗi hỏng hoặc rỗng thì trả về rỗng thay vì ném lỗi: một timestamp lạ
+ * không được phép làm sập cả dòng lịch sử.
+ */
+export function relativeTime(createdAt: string | null | undefined, now: number = Date.now()): string {
+  if (!createdAt) return '';
+  const iso = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(createdAt)
+    ? createdAt.replace(' ', 'T') + (createdAt.endsWith('Z') ? '' : 'Z')
+    : createdAt;
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return '';
+  const diffSec = Math.max(0, Math.round((now - ts) / 1000));
+  if (diffSec < 60) return 'vừa xong';
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} phút trước`;
+  const diffHour = Math.round(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} giờ trước`;
+  const diffDay = Math.round(diffHour / 24);
+  if (diffDay === 1) return 'hôm qua';
+  return `${diffDay} ngày trước`;
 }

@@ -14,6 +14,9 @@ import type { TaskRecord } from './types';
 const SIZE = 32;
 const RING_W = 4;
 const RING_BLUE = '#2563eb';
+// Khác BADGE_GRAY (#71717a) một cách cố ý, không phải lệch nhầm: vòng xám này
+// khớp màu xám tạm-dừng/chờ trong popup, còn BADGE_GRAY là màu rảnh của badge
+// — hai ngữ cảnh khác nhau, đừng gộp làm một hằng số.
 const RING_GRAY = '#a1a1aa';
 
 /** Khoá lần vẽ gần nhất. Trùng khoá thì bỏ qua — đây là chốt chặn vẽ thừa. */
@@ -33,8 +36,20 @@ export async function applyIconState(
   const key = iconKey(task);
 
   const badge = badgeFor(tasks, tabCaptureCount);
-  await browser.action.setBadgeText({ text: badge.text, ...(tabId ? { tabId } : {}) }).catch(() => {});
-  await browser.action.setBadgeBackgroundColor({ color: badge.color }).catch(() => {});
+  const scoped = badge.perTab && tabId !== undefined;
+  await browser.action
+    .setBadgeText({ text: badge.text, ...(scoped ? { tabId } : {}) })
+    .catch(() => {});
+  await browser.action
+    .setBadgeBackgroundColor({ color: badge.color, ...(scoped ? { tabId } : {}) })
+    .catch(() => {});
+  // Global không tự đè per-tab: nếu badge trước đó thuộc tab này (captures) và
+  // giờ chuyển sang toàn cục (download bắt đầu), badge tab-scoped cũ vẫn còn
+  // treo trên đúng tab đó vì Chrome coi hai scope là hai giá trị độc lập. Xoá
+  // tường minh bản ghi theo-tab mỗi khi badge hiện tại là toàn cục.
+  if (!scoped && tabId !== undefined) {
+    await browser.action.setBadgeText({ text: '', tabId }).catch(() => {});
+  }
 
   if (key === lastKey) return; // không đổi thì không vẽ
   lastKey = key;
