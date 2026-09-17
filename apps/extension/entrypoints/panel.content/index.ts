@@ -53,6 +53,8 @@ export default defineContentScript({
     let captures: Capture[] = [];
     let mounted = false;
     let activeTask: string | null = null;
+    // URL người dùng tự chọn trong danh sách stream — null là để hệ thống tự chọn.
+    let chosenUrl: string | null = null;
     let onProgress: ((e?: ProgressEvent, err?: string) => void) | null = null;
 
     const ui = await createShadowRootUi(ctx, {
@@ -71,8 +73,37 @@ export default defineContentScript({
       },
     });
 
+    /**
+     * Chọn stream để tải: DÀI NHẤT, không phải mới nhất.
+     *
+     * Trang phát phim nạp nhiều manifest từ nhiều host cùng lúc, và quảng cáo
+     * thường nạp sau — lấy cái mới nhất là lấy trúng quảng cáo (đã gặp: tải về
+     * một file 805 KB toàn quảng cáo trong khi phim dài một tiếng).
+     * Thời lượng tách hai thứ đó dứt khoát mà không cần đoán tên miền.
+     * Chưa đo xong thì tạm giữ nếp cũ là cái mới nhất.
+     */
+    function pickCapture(list: Capture[]): Capture | undefined {
+      if (!list.length) return undefined;
+      if (chosenUrl) {
+        const manual = list.find((c) => c.url === chosenUrl);
+        if (manual) return manual; // người dùng đã tự chọn thì tôn trọng
+      }
+      const measured = list.filter((c) => typeof c.durationSec === 'number' && c.durationSec! > 0);
+      if (!measured.length) return list[list.length - 1];
+      return measured.reduce((a, b) => (b.durationSec! > a.durationSec! ? b : a));
+    }
+
+    const fmtDur = (sec?: number | null): string => {
+      if (typeof sec !== 'number' || sec <= 0) return 'đang đo…';
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = Math.floor(sec % 60);
+      return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+               : `${m}:${String(s).padStart(2, '0')}`;
+    };
+
     function render(root: HTMLElement) {
-      const cap = captures[captures.length - 1];
+      const cap = pickCapture(captures);
       if (!cap) return;
 
       root.innerHTML = '';
@@ -92,7 +123,29 @@ export default defineContentScript({
 
       const sub = document.createElement('div');
       sub.className = 'sl-sub';
-      sub.textContent = cap.host;
+      sub.textContent = `${cap.host} · ${fmtDur(cap.durationSec)}`;
+
+      // Nhiều stream thì cho chọn tay: phép đo thời lượng đúng gần hết các lần,
+      // nhưng khi nó sai thì người dùng phải có đường sửa, chứ không phải tải về
+      // rồi mới biết nhầm.
+      let picker: HTMLSelectElement | null = null;
+      if (captures.length > 1) {
+        picker = document.createElement('select');
+        const ranked = [...captures].sort(
+          (a, b) => (b.durationSec ?? -1) - (a.durationSec ?? -1),
+        );
+        for (const c of ranked) {
+          const o = document.createElement('option');
+          o.value = c.url;
+          o.textContent = `${c.host} · ${fmtDur(c.durationSec)}`;
+          o.selected = c.url === cap.url;
+          picker.append(o);
+        }
+        picker.onchange = () => {
+          chosenUrl = picker!.value;
+          render(root);
+        };
+      }
 
       const row = document.createElement('div');
       row.className = 'sl-row';
@@ -111,7 +164,9 @@ export default defineContentScript({
       bar.append(fill);
       bar.style.display = 'none';
 
-      root.append(head, sub, row, msg, bar);
+      root.append(head, sub);
+      if (picker) root.append(picker);
+      root.append(row, msg, bar);
 
       const say = (text: string, isError = false) => {
         msg.textContent = text;
