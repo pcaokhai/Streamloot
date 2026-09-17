@@ -77,7 +77,7 @@ export async function health(): Promise<Health> {
     // cổng có người nghe nhưng không phải Streamloot (hay tiến trình đang kẹt),
     // fetch treo vô hạn và popup đứng ở "Đang kiểm tra…" mãi mãi — người dùng
     // đọc được đúng con số không. Quá hạn thì coi như không gọi được.
-    res = await fetch(`${await baseUrl()}/history`, {
+    res = await fetch(`${await baseUrl()}/health`, {
       headers: jsonHeaders(),
       signal: AbortSignal.timeout(4000),
     });

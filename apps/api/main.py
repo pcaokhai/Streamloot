@@ -606,6 +606,19 @@ async def stream_progress(
     return EventSourceResponse(event_generator())
 
 
+@app.get("/api/v1/health", dependencies=[Depends(verify_api_key)])
+def health_check():
+    """
+    Kiểm tra còn sống, KHÔNG đụng database.
+
+    Extension trước đây hỏi `/history` để biết app có chạy không — tức là kéo 50
+    dòng lịch sử (vài KB, một lượt truy vấn SQLite) chỉ để trả lời câu hỏi
+    có/không. Endpoint này không đọc gì cả, nên câu trả lời không bao giờ phụ
+    thuộc vào việc DB đang bận hay lịch sử dài bao nhiêu.
+    """
+    return {"ok": True}
+
+
 @app.get("/api/v1/history", dependencies=[Depends(verify_api_key)])
 def get_history(source: Optional[Literal["cli", "desktop", "extension", "unknown"]] = None):
     # source=None trả mọi nguồn — cửa sổ app dùng thế (D6).
