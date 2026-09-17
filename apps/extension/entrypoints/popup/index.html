@@ -15,13 +15,45 @@
       td { padding: 3px 0; border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
       td.h { font-family: ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
       button { font: inherit; padding: 4px 10px; margin-top: 10px; }
+      .head { display: flex; align-items: center; justify-content: space-between; }
+      .tabs { display: flex; gap: 4px; }
+      .tab { font: inherit; padding: 3px 9px; margin: 0; border-radius: 6px;
+             border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+             background: transparent; cursor: pointer; }
+      .tab.on { background: #2563eb; color: #fff; border-color: #2563eb; }
+      .task { margin: 10px 0; }
+      .task .t { display: flex; justify-content: space-between; gap: 8px; }
+      .task .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .bar { height: 5px; border-radius: 3px; margin: 4px 0;
+             background: color-mix(in srgb, currentColor 14%, transparent); }
+      .bar i { display: block; height: 100%; border-radius: 3px; background: #2563eb; }
+      .bar.paused i { background: #a1a1aa; }
+      .ctl { display: flex; gap: 6px; }
+      .ctl button { font: inherit; padding: 2px 9px; margin: 0; cursor: pointer; }
+      .sep { font-size: 11px; opacity: .6; margin: 12px 0 4px; }
+      .empty { font-size: 12px; opacity: .6; padding: 6px 0; }
     </style>
   </head>
   <body>
-    <h1>Streamloot</h1>
+    <div class="head">
+      <h1>Streamloot</h1>
+      <div class="tabs">
+        <button id="tab-dl" class="tab on">Tải</button>
+        <button id="tab-hist" class="tab">Lịch sử</button>
+      </div>
+    </div>
     <div class="row" id="status"><span class="dot wait"></span>Đang kiểm tra…</div>
     <div id="hint" class="hint"></div>
-    <div id="caps"></div>
+
+    <section id="pane-dl">
+      <div id="tasks"></div>
+      <div id="caps"></div>
+    </section>
+
+    <section id="pane-hist" hidden>
+      <div id="history"></div>
+    </section>
+
     <button id="opts">Cài đặt</button>
     <script type="module" src="./main.ts"></script>
   </body>
