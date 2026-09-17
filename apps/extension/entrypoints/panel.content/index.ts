@@ -118,6 +118,20 @@ export default defineContentScript({
         pageDurationSec: pageDuration(),
         chosenUrl,
       });
+      // Vì sao chọn cái này: in ra để khi chọn sai còn có cơ sở mà lần, thay vì
+      // phải đoán từ ảnh chụp màn hình. Referer là tín hiệu chính, nên nó phải
+      // nhìn thấy được.
+      console.debug(
+        '[Streamloot] ứng viên:',
+        captures.map((c) => ({
+          host: c.host,
+          referer: c.referer,
+          duration: c.durationSec,
+        })),
+        '| trang:', location.hostname,
+        '| thời lượng <video>:', pageDuration(),
+        '| chọn:', cap?.host,
+      );
       // pickCapture chỉ trả rỗng khi KHÔNG còn ứng viên nào — nó không bao giờ
       // bắt panel đợi một phép đo (xem lib/pick.ts bước 5).
       if (!cap) return;

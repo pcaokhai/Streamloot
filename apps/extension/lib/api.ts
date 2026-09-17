@@ -184,7 +184,20 @@ export async function probeDuration(
       user_agent: userAgent ?? null,
     });
     return r.duration_sec;
-  } catch {
+  } catch (err) {
+    // Ghi ra lý do thay vì nuốt trọn. "App cũ chưa có endpoint này" (404) và
+    // "CDN từ chối manifest" đều ra `null`, nhưng cách sửa hoàn toàn khác nhau:
+    // một bên build lại app, một bên đổi tín hiệu xếp hạng. Gộp hai thứ đó làm
+    // một là bắt người dùng đoán.
+    const status = err instanceof BackendError ? err.status : undefined;
+    if (status === 404) {
+      console.warn(
+        '[Streamloot] App đang chạy chưa có /probe/duration — build lại app (./build_app.sh). ' +
+          'Không đo được thời lượng thì panel phải đoán khi một trang có nhiều stream.',
+      );
+    } else {
+      console.warn('[Streamloot] Đo thời lượng hỏng:', status ?? err);
+    }
     return null;
   }
 }
