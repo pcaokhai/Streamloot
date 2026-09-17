@@ -1,5 +1,6 @@
 import * as api from '../../lib/api';
 import { loadSettings } from '../../lib/settings';
+import { relativeTime } from '../../lib/tasks';
 import type { Capture, HistoryRow, TaskRecord } from '../../lib/types';
 import { TERMINAL_STATUSES } from '../../lib/types';
 
@@ -31,10 +32,12 @@ async function renderTasks(): Promise<void> {
   let tasks: TaskRecord[];
   try {
     tasks = (await api.getActiveTasks()).tasks;
-  } catch {
+  } catch (err) {
     // Response cũ về muộn thì bỏ: vẽ nó lên là xoá mất trạng thái người dùng vừa đổi.
     if (mine !== renderSeq) return;
     box.innerHTML = '<div class="empty">Không đọc được danh sách tải.</div>';
+    console.error('Streamloot renderTasks:', err);
+    el('err').textContent = err instanceof Error ? err.message : String(err);
     return;
   }
   if (mine !== renderSeq) return;
@@ -45,17 +48,21 @@ async function renderTasks(): Promise<void> {
   }
   box.innerHTML = live.map((t) => {
     const paused = t.status === 'paused';
+    // 'cancelling' không phải trạng thái cuối (backend chỉ đặt nó rồi chờ tiến
+    // trình chết) nhưng cũng không còn điều khiển được — ✕ lần nữa chỉ ăn 409.
+    const cancelling = t.status === 'cancelling';
     const pct = Math.round(t.progress);
-    const right = paused ? 'Tạm dừng' : `${pct}%`;
-    const busy = pending.has(t.task_id);
+    const right = cancelling ? 'Đang huỷ…' : paused ? 'Tạm dừng' : `${pct}%`;
+    const busy = pending.has(t.task_id) || cancelling;
     return `<div class="task" data-id="${esc(t.task_id)}">
       <div class="t"><span class="name">${esc(nameOf(t))}</span><span>${right}</span></div>
       <div class="bar${paused ? ' paused' : ''}"><i style="width:${pct}%"></i></div>
       <div class="t">
         <span class="hint">${esc(t.avg_speed ?? '')}</span>
         <span class="ctl">
+          ${cancelling ? '' : `
           <button data-act="${paused ? 'resume' : 'pause'}"${busy ? ' disabled' : ''}>${paused ? '▶' : '⏸'}</button>
-          <button data-act="cancel"${busy ? ' disabled' : ''}>✕</button>
+          <button data-act="cancel"${busy ? ' disabled' : ''}>✕</button>`}
         </span>
       </div>
     </div>`;
@@ -67,8 +74,10 @@ async function renderHistory(): Promise<void> {
   let rows: HistoryRow[];
   try {
     rows = await api.getHistory('extension');
-  } catch {
+  } catch (err) {
     box.innerHTML = '<div class="empty">Không đọc được lịch sử.</div>';
+    console.error('Streamloot renderHistory:', err);
+    el('err').textContent = err instanceof Error ? err.message : String(err);
     return;
   }
   if (!rows.length) {
@@ -77,7 +86,7 @@ async function renderHistory(): Promise<void> {
   }
   box.innerHTML = '<table>' + rows.map((r) => {
     const ok = r.status === 'SUCCESS';
-    return `<tr><td>${esc(r.title)}</td><td style="text-align:right">${ok ? '✓' : '✗'}</td></tr>`;
+    return `<tr><td>${esc(r.title)}</td><td class="hint">${esc(relativeTime(r.created_at))}</td><td style="text-align:right">${ok ? '✓' : '✗'}</td></tr>`;
   }).join('') + '</table>';
 }
 
@@ -128,6 +137,9 @@ el('tasks').addEventListener('click', (ev) => {
   const id = (ev.target as HTMLElement).closest('.task')?.getAttribute('data-id');
   if (!btn || !id || pending.has(id)) return;
   const act = btn.getAttribute('data-act');
+  // Huỷ là thao tác phá huỷ — không được là nhánh mặc định cho data-act thiếu
+  // hoặc gõ sai. Chỉ ba giá trị hợp lệ mới được hành động.
+  if (act !== 'pause' && act !== 'resume' && act !== 'cancel') return;
   const call = act === 'pause' ? api.pauseTask : act === 'resume' ? api.resumeTask : api.cancelTask;
   pending.add(id);
   btn.disabled = true;
