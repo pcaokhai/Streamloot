@@ -1,5 +1,5 @@
 import { loadSettings } from './settings';
-import type { FormatOption, ProgressEvent, StartResult, VideoInfoPayload } from './types';
+import type { FormatOption, ProgressEvent, StartResult, VideoInfoPayload, TaskRecord, HistoryRow } from './types';
 import { TERMINAL_STATUSES } from './types';
 
 /** Backend chỉ bind 127.0.0.1 (ADR 0004) — không bao giờ gọi ra ngoài máy. */
@@ -56,6 +56,20 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   if (!res.ok) {
     throw new BackendError(`Backend trả ${res.status}`, res.status);
   }
+  return (await res.json()) as T;
+}
+
+async function get<T>(path: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${await baseUrl()}${path}`, { headers: jsonHeaders() });
+  } catch {
+    throw new BackendError('Không kết nối được Streamloot. App đã chạy chưa?');
+  }
+  if (res.status === 401 || res.status === 403) {
+    throw new BackendError('App từ chối extension này. ID có khớp không?', res.status);
+  }
+  if (!res.ok) throw new BackendError(`Backend trả ${res.status}`, res.status);
   return (await res.json()) as T;
 }
 
@@ -200,4 +214,26 @@ export async function probeDuration(
     }
     return null;
   }
+}
+
+/** Mọi task chưa kết thúc, bất kể nguồn nào khởi động (D2 — danh sách là toàn cục). */
+export function getActiveTasks(): Promise<{ tasks: TaskRecord[] }> {
+  return get<{ tasks: TaskRecord[] }>('/downloads/active');
+}
+
+/** Lịch sử. Mặc định chỉ lấy phần do extension tải (tab Lịch sử, spec §5.2). */
+export function getHistory(source = 'extension'): Promise<HistoryRow[]> {
+  return get<HistoryRow[]>(`/history?source=${encodeURIComponent(source)}`);
+}
+
+export async function pauseTask(taskId: string): Promise<void> {
+  await post(`/downloads/${taskId}/pause`, {});
+}
+
+export async function resumeTask(taskId: string): Promise<void> {
+  await post(`/downloads/${taskId}/resume`, {});
+}
+
+export async function cancelTask(taskId: string): Promise<void> {
+  await post(`/downloads/${taskId}/cancel`, {});
 }
