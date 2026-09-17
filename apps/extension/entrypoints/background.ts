@@ -215,7 +215,9 @@ export default defineBackground(() => {
       return Promise.resolve({ ok: true });
     }
     if (m?.type === 'getTasks') {
-      return refreshTasks().then((tasks) => ({ ok: true, tasks }));
+      return refreshTasks().then((tasks) =>
+        tasks === null ? { ok: false as const, tasks: lastKnownTasks } : { ok: true as const, tasks },
+      );
     }
 
     return undefined;
@@ -226,7 +228,8 @@ export default defineBackground(() => {
   let viewers = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  async function refreshTasks(): Promise<TaskRecord[]> {
+  /** `null` = KHÔNG HỎI ĐƯỢC (khác hẳn mảng rỗng = hỏi được, và không có task). */
+  async function refreshTasks(): Promise<TaskRecord[] | null> {
     try {
       const { tasks } = await api.getActiveTasks();
       setLastKnownTasks(tasks);
@@ -235,8 +238,10 @@ export default defineBackground(() => {
       await applyIconState(tasks, caps.length, tab?.id);
       return tasks;
     } catch {
-      // App tắt giữa chừng là chuyện bình thường. Giữ nhịp, lần sau gọi lại.
-      return [];
+      // App tắt giữa chừng là chuyện bình thường. Không có dữ liệu mới thì
+      // không ghi lastKnownTasks, không vẽ lại icon — trả null để tick() giữ
+      // nguyên hiểu biết cũ thay vì kết luận nhầm là đã hết task.
+      return null;
     }
   }
 
@@ -255,7 +260,9 @@ export default defineBackground(() => {
       void browser.alarms.clear(ALARM);
       return;
     }
-    if (ms <= 5000) {
+    // Hợp đồng của nextPollMs chỉ trả 1000 | 60000 | null — so bằng đúng giá trị
+    // ngắn thay vì ngưỡng lỏng (<= 5000) để không âm thầm chấp nhận giá trị lạ.
+    if (ms === 1000) {
       void browser.alarms.clear(ALARM);
       timer = setTimeout(() => void tick(), ms);
     } else {
@@ -263,8 +270,19 @@ export default defineBackground(() => {
     }
   }
 
+  let tickSeq = 0;
+
   async function tick(): Promise<void> {
-    schedule(await refreshTasks());
+    const mine = ++tickSeq;
+    const tasks = await refreshTasks();
+    // Tick cũ về muộn thì bỏ qua: nó mang ảnh chụp cũ, mà schedule() chỉ được
+    // nghe theo ảnh chụp mới nhất. Không có chốt này thì một response lạc hậu
+    // ghi đè quyết định đúng và poll dừng giữa lúc đang tải.
+    if (mine !== tickSeq) return;
+    // Không hỏi được thì DỰA VÀO hiểu biết gần nhất, đừng kết luận là hết task.
+    // Kết luận nhầm sẽ dừng poll vĩnh viễn cho tới khi người dùng mở popup —
+    // app restart một nhịp là đủ để mất dấu một download đang chạy.
+    schedule(tasks ?? lastKnownTasks);
   }
 
   browser.alarms.onAlarm.addListener((a) => {
