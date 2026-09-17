@@ -9,6 +9,16 @@ const esc = (s: string) =>
 const el = (id: string) => document.getElementById(id)!;
 const nameOf = (t: TaskRecord) => t.title || t.url;
 
+// task_id đang có hành động bay tới backend. Nút của chúng phải luôn mờ, kể cả
+// sau khi danh sách được vẽ lại — nếu không người dùng bấm được lần hai trong
+// khoảng thời gian request còn đang bay.
+const pending = new Set<string>();
+
+// Đếm lượt gọi renderTasks còn hiệu lực. Interval 1s và click handler đều tự
+// gọi renderTasks với fetch riêng, không đảm bảo thứ tự resolve — nếu không
+// chặn, response cũ (bắt đầu trước) có thể về sau và ghi đè trạng thái mới.
+let renderSeq = 0;
+
 /**
  * Popup gọi thẳng backend, không qua service worker.
  *
@@ -16,14 +26,18 @@ const nameOf = (t: TaskRecord) => t.title || t.url;
  * qua service worker chỉ thêm một chặng có thể chết giữa chừng.
  */
 async function renderTasks(): Promise<void> {
+  const mine = ++renderSeq;
   const box = el('tasks');
   let tasks: TaskRecord[];
   try {
     tasks = (await api.getActiveTasks()).tasks;
   } catch {
+    // Response cũ về muộn thì bỏ: vẽ nó lên là xoá mất trạng thái người dùng vừa đổi.
+    if (mine !== renderSeq) return;
     box.innerHTML = '<div class="empty">Không đọc được danh sách tải.</div>';
     return;
   }
+  if (mine !== renderSeq) return;
   const live = tasks.filter((t) => !TERMINAL_STATUSES.has(t.status));
   if (!live.length) {
     box.innerHTML = '<div class="empty">Không có gì đang tải.</div>';
@@ -33,14 +47,15 @@ async function renderTasks(): Promise<void> {
     const paused = t.status === 'paused';
     const pct = Math.round(t.progress);
     const right = paused ? 'Tạm dừng' : `${pct}%`;
+    const busy = pending.has(t.task_id);
     return `<div class="task" data-id="${esc(t.task_id)}">
       <div class="t"><span class="name">${esc(nameOf(t))}</span><span>${right}</span></div>
       <div class="bar${paused ? ' paused' : ''}"><i style="width:${pct}%"></i></div>
       <div class="t">
         <span class="hint">${esc(t.avg_speed ?? '')}</span>
         <span class="ctl">
-          <button data-act="${paused ? 'resume' : 'pause'}">${paused ? '▶' : '⏸'}</button>
-          <button data-act="cancel">✕</button>
+          <button data-act="${paused ? 'resume' : 'pause'}"${busy ? ' disabled' : ''}>${paused ? '▶' : '⏸'}</button>
+          <button data-act="cancel"${busy ? ' disabled' : ''}>✕</button>
         </span>
       </div>
     </div>`;
@@ -111,13 +126,18 @@ el('opts').addEventListener('click', () => void browser.runtime.openOptionsPage(
 el('tasks').addEventListener('click', (ev) => {
   const btn = (ev.target as HTMLElement).closest('button');
   const id = (ev.target as HTMLElement).closest('.task')?.getAttribute('data-id');
-  if (!btn || !id) return;
+  if (!btn || !id || pending.has(id)) return;
   const act = btn.getAttribute('data-act');
   const call = act === 'pause' ? api.pauseTask : act === 'resume' ? api.resumeTask : api.cancelTask;
+  pending.add(id);
   btn.disabled = true;
   void call(id)
-    .catch((err) => { el('hint').textContent = String(err?.message ?? err); })
-    .finally(() => void renderTasks());
+    .then(() => { el('err').textContent = ''; })
+    .catch((err) => { el('err').textContent = String(err?.message ?? err); })
+    .finally(() => {
+      pending.delete(id);
+      void renderTasks();
+    });
 });
 
 // Báo service worker là có người đang xem => nó chuyển sang nhịp 1s (spec §4.2).
