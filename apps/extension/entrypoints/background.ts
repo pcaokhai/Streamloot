@@ -13,12 +13,26 @@
  */
 import * as api from '../lib/api';
 import { BackendError } from '../lib/api';
-import type { Capture, VideoInfoPayload } from '../lib/types';
+import { applyIconState } from '../lib/icon';
+import type { Capture, TaskRecord, VideoInfoPayload } from '../lib/types';
 
 const MANIFEST_URL = /\.(m3u8|mpd)(\?|$)/i;
 const MANIFEST_TYPE = /(mpegurl|dash\+xml)/i;
 
 const keyFor = (tabId: number) => `captures:${tabId}`;
+
+/**
+ * Ảnh chụp task gần nhất từ backend.
+ *
+ * Extension không phải nguồn sự thật (spec §4.1) — biến này chỉ để vẽ icon mà
+ * không phải gọi mạng. Service worker chết thì nó về rỗng, và lần poll kế tiếp
+ * dựng lại đầy đủ.
+ */
+let lastKnownTasks: TaskRecord[] = [];
+
+export function setLastKnownTasks(tasks: TaskRecord[]): void {
+  lastKnownTasks = tasks;
+}
 
 /** Trần mỗi tab: một trang có thể nạp nhiều biến thể playlist. */
 const MAX_PER_TAB = 12;
@@ -35,11 +49,9 @@ async function addCapture(tabId: number, cap: Capture): Promise<void> {
   const next = [...existing, cap].slice(-MAX_PER_TAB);
   await browser.storage.session.set({ [keyFor(tabId)]: next });
 
-  // B8 — badge cho biết ngay trang này bắt được mấy stream, không bắt người dùng
-  // đi tìm. Đây là khác biệt giữa "công cụ tôi phải nhớ là mình có" và "công cụ
-  // luôn ở đó" (R5 trong ADR 0005).
-  await browser.action.setBadgeText({ tabId, text: String(next.length) }).catch(() => {});
-  await browser.action.setBadgeBackgroundColor({ tabId, color: '#2563eb' }).catch(() => {});
+  // Badge và vòng do applyIconState quyết (lib/tasks.ts), không đặt tay ở đây
+  // nữa — hai chỗ cùng đặt badge là hai chỗ sẽ lệch nhau.
+  await applyIconState(lastKnownTasks, next.length, tabId);
 
   // Báo content script để panel tự nổi lên.
   browser.tabs.sendMessage(tabId, { type: 'captures', captures: next }).catch(() => {
