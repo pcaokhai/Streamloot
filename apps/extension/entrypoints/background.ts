@@ -29,49 +29,6 @@ async function getCaptures(tabId: number): Promise<Capture[]> {
   return (stored as Record<string, Capture[]>)[k] ?? [];
 }
 
-/**
- * Đo thời lượng một playlist HLS.
- *
- * Dùng để tách phim khỏi quảng cáo. Chạy trong service worker vì ở đây có
- * `host_permissions`: Chrome cho gọi thẳng, không vướng CORS — content script
- * thì không làm được việc này.
- *
- * Master playlist không chứa #EXTINF (nó chỉ liệt kê các biến thể), nên khi gặp
- * master thì đi tiếp vào biến thể đầu tiên đúng một lần.
- */
-async function probeDuration(url: string, referer?: string, depth = 0): Promise<number | null> {
-  if (depth > 1) return null;
-  try {
-    const res = await fetch(url, {
-      headers: referer ? { Referer: referer } : {},
-      signal: AbortSignal.timeout(6000),
-    });
-    if (!res.ok) return null;
-    const text = await res.text();
-
-    if (/#EXT-X-STREAM-INF/i.test(text)) {
-      // Dòng ngay sau #EXT-X-STREAM-INF là URL biến thể (có thể là đường dẫn tương đối).
-      const lines = text.split('\n').map((l) => l.trim());
-      const idx = lines.findIndex((l) => /^#EXT-X-STREAM-INF/i.test(l));
-      const variant = lines.slice(idx + 1).find((l) => l && !l.startsWith('#'));
-      if (!variant) return null;
-      return probeDuration(new URL(variant, url).toString(), referer, depth + 1);
-    }
-
-    let total = 0;
-    for (const m of text.matchAll(/#EXTINF:\s*([\d.]+)/gi)) {
-      const v = parseFloat(m[1]);
-      if (!Number.isNaN(v)) total += v;
-    }
-    return total > 0 ? total : null;
-  } catch {
-    // Hết giờ, mạng lỗi, manifest lạ — không đo được thì trả null, KHÔNG ném:
-    // đo thời lượng là để xếp hạng cho tốt hơn, hỏng nó không được phép làm
-    // hỏng việc bắt stream.
-    return null;
-  }
-}
-
 async function addCapture(tabId: number, cap: Capture): Promise<void> {
   const existing = await getCaptures(tabId);
   if (existing.some((c) => c.url === cap.url)) return; // playlist bị fetch lại nhiều lần
@@ -91,7 +48,7 @@ async function addCapture(tabId: number, cap: Capture): Promise<void> {
 
   // Đo thời lượng ở nền rồi báo lại: panel hiện ngay, không đợi phép đo. Đo xong
   // mới biết cái nào là phim, cái nào là quảng cáo.
-  void probeDuration(cap.url, cap.referer).then(async (durationSec) => {
+  void api.probeDuration(cap.url, cap.referer, cap.userAgent).then(async (durationSec) => {
     const list = await getCaptures(tabId);
     const i = list.findIndex((c) => c.url === cap.url);
     if (i < 0) return; // tab đã chuyển trang trong lúc đo

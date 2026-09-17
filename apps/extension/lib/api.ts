@@ -161,3 +161,30 @@ export async function streamProgress(
     }
   }
 }
+
+/**
+ * Nhờ backend đo thời lượng một playlist.
+ *
+ * Không tự `fetch` trong extension: trình duyệt cấm đặt `Referer`, mà CDN video
+ * thường từ chối request thiếu nó — đo tại chỗ thì treo tới hết giờ rồi trả về
+ * tay không, và panel hiện "đang đo…" vĩnh viễn. Python đặt được header đó.
+ *
+ * Trả `null` khi không đo được. KHÔNG ném: đây là tín hiệu phụ để xếp hạng,
+ * hỏng nó không được phép làm hỏng việc bắt stream.
+ */
+export async function probeDuration(
+  url: string,
+  referer?: string,
+  userAgent?: string,
+): Promise<number | null> {
+  try {
+    const r = await post<{ duration_sec: number | null }>('/probe/duration', {
+      url,
+      referer: referer ?? null,
+      user_agent: userAgent ?? null,
+    });
+    return r.duration_sec;
+  } catch {
+    return null;
+  }
+}

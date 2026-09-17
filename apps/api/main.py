@@ -22,6 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from services.download_service import DownloadService
+from services.manifest_probe import probe_duration
 from services.history_service import HistoryService
 from extractors.factory import ExtractorFactory
 from downloaders.ytdlp import YtDlpDownloader
@@ -604,6 +605,24 @@ async def stream_progress(
             registry.unsubscribe(task_id, q)
 
     return EventSourceResponse(event_generator())
+
+
+class ProbeDurationRequest(BaseModel):
+    url: str
+    referer: Optional[str] = None
+    user_agent: Optional[str] = None
+
+
+@app.post("/api/v1/probe/duration", dependencies=[Depends(verify_api_key)])
+def probe_manifest_duration(req: ProbeDurationRequest):
+    """
+    Đo thời lượng một playlist, để client biết cái nào là phim cái nào là quảng cáo.
+
+    Extension không tự đo được: `fetch` của trình duyệt không cho đặt `Referer`
+    (header bị cấm), mà CDN video thường từ chối request thiếu Referer — đo thật
+    thì phép đo treo tới hết giờ rồi trả về tay không. Ở đây thì đặt được.
+    """
+    return {"duration_sec": probe_duration(req.url, req.referer, req.user_agent)}
 
 
 @app.get("/api/v1/health", dependencies=[Depends(verify_api_key)])
