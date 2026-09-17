@@ -6,4 +6,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 npx esbuild lib/pick.ts --bundle --format=esm --outfile=.tmp-pick.mjs --log-level=error
 node tests/pick.test.mjs
-rm -f .tmp-pick.mjs
+npx esbuild lib/tasks.ts --bundle --format=esm --outfile=.tmp-tasks.mjs --log-level=error
+node tests/tasks.test.mjs
+rm -f .tmp-pick.mjs .tmp-tasks.mjs
