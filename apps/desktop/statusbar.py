@@ -50,11 +50,24 @@ class _Target(AppKit.NSObject):
     def onQuit_(self, sender):
         self._handlers['quit']()
 
+    # Ba selector dưới đây là BIÊN GIỚI Objective-C: exception ném ra khỏi đây
+    # không có traceback Python nào, AppKit chỉ im lặng nuốt. Mọi thứ trong này
+    # phải tự bọc và tự ghi log, nếu không một cú bấm hỏng là hỏng không dấu vết.
     def onToggle_(self, sender):
-        self._handlers['task']['toggle'](sender.representedObject())
+        tid = sender.representedObject()
+        Logger.get_logger().info(f"Menu bar: bấm toggle cho task {tid}")
+        try:
+            self._handlers['task']['toggle'](tid)
+        except Exception as e:
+            Logger.error(f"Menu bar: onToggle_ hỏng với task {tid}: {e}", exc_info=True)
 
     def onCancel_(self, sender):
-        self._handlers['task']['cancel'](sender.representedObject())
+        tid = sender.representedObject()
+        Logger.get_logger().info(f"Menu bar: bấm huỷ cho task {tid}")
+        try:
+            self._handlers['task']['cancel'](tid)
+        except Exception as e:
+            Logger.error(f"Menu bar: onCancel_ hỏng với task {tid}: {e}", exc_info=True)
 
 
 class _MenuDelegate(AppKit.NSObject):

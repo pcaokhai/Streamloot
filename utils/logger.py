@@ -62,7 +62,14 @@ class Logger:
         cls._debug_mode = debug
         cls._init_logger()
         if cls._file_handler:
-            cls._file_handler.setLevel(logging.DEBUG if debug else logging.ERROR)
+            # INFO chứ không phải ERROR cho file log.
+            #
+            # Để ERROR thì cả một phiên chạy chỉ để lại vài dòng, và mọi sự kiện
+            # "đã bấm nút này, đã đi vào nhánh kia" đều biến mất — đúng lúc cần
+            # tìm nguyên nhân thì không có gì để đọc. File log là thứ người dùng
+            # gửi lại khi báo lỗi; nó phải kể được câu chuyện. Console vẫn sạch
+            # vì đó là handler riêng.
+            cls._file_handler.setLevel(logging.DEBUG if debug else logging.INFO)
 
     @classmethod
     def _init_logger(cls):

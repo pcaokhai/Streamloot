@@ -179,8 +179,11 @@ def main():
             try:
                 task = hist.get_task(task_id)
                 if not task:
-                    Logger.get_logger().debug(
-                        f"Menu bar: task {task_id} không còn tồn tại, bỏ qua toggle"
+                    # WARNING chứ không phải DEBUG: ở bản chạy thật debug bị tắt,
+                    # nên nhánh này từng nuốt trọn cú bấm mà log không có một chữ.
+                    Logger.error(
+                        f"Menu bar: không đọc được task {task_id} (không tồn tại "
+                        f"hoặc DB đang bận) — bỏ qua toggle"
                     )
                     return
                 from apps.api.main import pause_download, resume_download
@@ -195,11 +198,29 @@ def main():
             except Exception as e:
                 Logger.error(f"Menu bar: không huỷ được task {task_id}: {e}", exc_info=True)
 
+        def _off_main(fn, task_id):
+            """
+            Chạy hành động menu ở thread khác.
+
+            `onToggle_`/`onCancel_` là ObjC action selector: chúng chạy trên MAIN
+            THREAD, cũng là thread vẽ giao diện. Bên trong lại là SQLite + tín
+            hiệu tiến trình — chỉ cần kẹt khoá DB một nhịp là cả cửa sổ đứng hình
+            (đã gặp: bấm Huỷ xong cửa sổ treo). Đẩy sang thread nền thì UI không
+            bao giờ phải đợi I/O.
+            """
+            threading.Thread(target=fn, args=(task_id,), daemon=True).start()
+
         statusbar.install(
             on_show=show_window,
             on_quit=quit_app,
             port=DESKTOP_PORT,
-            task_actions={"list": hist.get_active_tasks, "toggle": toggle, "cancel": cancel},
+            task_actions={
+                "list": hist.get_active_tasks,
+                # Bọc qua _off_main: xem ghi chú ở đó — hai hàm này bị gọi từ ObjC
+                # action selector nên chạy thẳng là chạy trên thread giao diện.
+                "toggle": lambda tid: _off_main(toggle, tid),
+                "cancel": lambda tid: _off_main(cancel, tid),
+            },
         )
 
     debug = os.getenv("DOWNLOADER_DEBUG") == "1"

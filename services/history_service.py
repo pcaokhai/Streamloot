@@ -21,7 +21,24 @@ class HistoryService:
         self._init_db()
         
     def _get_connection(self):
-        return sqlite3.connect(self.db_path)
+        """
+        WAL + busy timeout, không phải `connect()` trần.
+
+        Luồng tải ghi tiến trình liên tục, trong khi menu bar và cửa sổ app đọc
+        từ thread khác. Ở journal mode mặc định, một lượt ghi khoá độc quyền cả
+        file nên bên ĐỌC cũng bị chặn: menu bar gọi `get_task` giữa lúc tải sẽ
+        treo tới lúc hết giờ rồi trả None, và cú bấm biến mất không dấu vết.
+        WAL cho đọc chạy song song với ghi; busy timeout lo phần ghi-đụng-ghi.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=15000")
+        except sqlite3.Error as e:
+            # WAL không bật được (ổ mạng, quyền thư mục) thì vẫn chạy tiếp với
+            # journal mặc định — chậm và dễ đụng khoá hơn, nhưng không chết.
+            Logger.error(f"Không bật được WAL cho {self.db_path}: {e}")
+        return conn
         
     def _init_db(self):
         try:
