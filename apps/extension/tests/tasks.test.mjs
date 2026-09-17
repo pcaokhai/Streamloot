@@ -21,12 +21,25 @@ t('nhiều task thì bám cái mới nhất, KHÔNG lấy trung bình',
     mk('cu', 'downloading', 90, '2026-09-17 10:00:00'),
     mk('moi', 'downloading', 5, '2026-09-17 10:05:00'),
   ])?.task_id, 'moi');
+t('hoà created_at thì phá bằng task_id, không phụ thứ tự mảng',
+  pickRingTask([
+    mk('a', 'downloading', 10, '2026-09-17 10:00:00'),
+    mk('z', 'downloading', 20, '2026-09-17 10:00:00'),
+  ])?.task_id ===
+  pickRingTask([
+    mk('z', 'downloading', 20, '2026-09-17 10:00:00'),
+    mk('a', 'downloading', 10, '2026-09-17 10:00:00'),
+  ])?.task_id, true);
 
 // --- quantize5: chặn vẽ thừa, tối đa 20 lần vẽ mỗi download ---
 t('làm tròn xuống bội số 5', quantize5(37), 35);
 t('đúng bội số thì giữ nguyên', quantize5(40), 40);
 t('kẹp dưới về 0', quantize5(-3), 0);
 t('kẹp trên về 100', quantize5(140), 100);
+t('đúng 100 giữ nguyên', quantize5(100), 100);
+t('NaN về 0', quantize5(NaN), 0);
+t('Infinity về 0', quantize5(Infinity), 0);
+t('-Infinity về 0', quantize5(-Infinity), 0);
 
 // --- iconKey: đổi khoá mới vẽ lại ---
 const a35 = mk('a', 'downloading', 37, '2026-09-17 10:00:00');
@@ -39,6 +52,8 @@ t('đổi trạng thái sang tạm dừng thì phải vẽ lại',
 t('không có task thì khoá rỗng', iconKey(undefined), 'idle');
 
 // --- badgeFor (spec §5.3) ---
+t('BADGE_BLUE đúng mã spec', BADGE_BLUE, '#2563eb');
+t('BADGE_GRAY đúng mã spec', BADGE_GRAY, '#71717a');
 t('hơn 1 download: hiện số, nền xanh',
   badgeFor([mk('a', 'downloading', 1, '1'), mk('b', 'downloading', 2, '2')], 0),
   { text: '2', color: BADGE_BLUE });

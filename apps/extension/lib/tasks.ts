@@ -20,11 +20,19 @@ const STEP = 5;
  * Cố ý KHÔNG lấy trung bình mọi task: thêm một download mới sẽ kéo tổng phần
  * trăm tụt xuống, vòng chạy ngược, trông như hỏng. Con số của một task thì luôn
  * tăng (spec §5.3).
+ *
+ * `created_at` chỉ tới độ phân giải giây, hai task cùng giây là chuyện thường.
+ * Truy vấn SQL không có khoá phụ nên thứ tự trả về là không xác định. Phá hoà
+ * bằng `task_id` để cùng dữ liệu luôn cho cùng kết quả, không phụ thứ tự mảy.
  */
 export function pickRingTask(tasks: TaskRecord[]): TaskRecord | undefined {
   const live = tasks.filter((t) => !TERMINAL_STATUSES.has(t.status));
   if (!live.length) return undefined;
-  return live.reduce((a, b) => (b.created_at > a.created_at ? b : a));
+  // live.length đã được kiểm ở trên nên reduce có ít nhất một phần tử
+  return live.reduce((a, b) => {
+    if (b.created_at !== a.created_at) return b.created_at > a.created_at ? b : a;
+    return b.task_id > a.task_id ? b : a;
+  });
 }
 
 /** Làm tròn xuống bội số 5, kẹp trong [0, 100]. */
