@@ -41,7 +41,16 @@ export function useTasks() {
   }, [patchTask]);
 
   const hydrate = useCallback(async () => {
-    const res = await api.getActiveTasks();
+    let res;
+    try {
+      res = await api.getActiveTasks();
+    } catch (err) {
+      // request() ném khi backend trả lỗi. Không bắt ở đây thì promise bị từ
+      // chối lặng lẽ và hydrate chết giữa chừng — cửa sổ trống trơn mà console
+      // là nơi duy nhất biết chuyện.
+      console.error("Không lấy được danh sách task đang chạy:", err);
+      return;
+    }
     if (!res) return;
     // MERGE với state hiện có, không thay hoàn toàn: hydrate() chạy lại mỗi lần
     // cửa sổ được show (streamloot:refresh), và snapshot REST không mang theo
@@ -90,6 +99,24 @@ export function useTasks() {
     const onRefresh = () => void hydrate();
     window.addEventListener("streamloot:refresh", onRefresh);
     return () => window.removeEventListener("streamloot:refresh", onRefresh);
+  }, [hydrate]);
+
+  // Hỏi lại định kỳ danh sách task đang chạy.
+  //
+  // Không có cái này thì cửa sổ chỉ biết những task nó tự khởi động, cộng với
+  // một lần chụp ảnh lúc mở. Người dùng bấm tải từ EXTENSION trong khi cửa sổ
+  // đang mở thì không có gì kích hoạt hydrate — task chạy xong từ đời nào cửa
+  // sổ vẫn trống (D6 yêu cầu thấy được mọi nguồn). SSE chỉ đẩy tiến trình của
+  // task ta đã biết, nó không báo "có task MỚI".
+  //
+  // Gọi localhost mỗi 2s là rẻ; dừng khi cửa sổ bị ẩn để không chạy vô ích.
+  useEffect(() => {
+    const tick = () => {
+      if (document.hidden) return;
+      void hydrate();
+    };
+    const id = window.setInterval(tick, 2000);
+    return () => window.clearInterval(id);
   }, [hydrate]);
 
   const beginDownload = useCallback(async (url: string, formatId: string | null, title: string | null) => {

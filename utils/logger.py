@@ -96,10 +96,14 @@ class Logger:
         cls._logger.setLevel(logging.DEBUG) 
         cls._logger.propagate = False
 
-        # File Handler: Only logs ERROR by default, or DEBUG if debug_mode is True.
+        # File Handler: INFO by default, DEBUG khi bật debug_mode.
         # delay=True ensures NO file is created on disk unless a record is actually emitted.
+        #
+        # Mức mặc định phải khớp với `init()` — trước đây một chỗ để ERROR, một
+        # chỗ để INFO, và chỗ nào chạy trước thì thắng: sửa một chỗ không đủ, log
+        # vẫn trống trơn. Giữ hai nơi này giống hệt nhau.
         cls._file_handler = logging.FileHandler(log_file, encoding='utf-8', delay=True)
-        cls._file_handler.setLevel(logging.DEBUG if cls._debug_mode else logging.ERROR)
+        cls._file_handler.setLevel(logging.DEBUG if cls._debug_mode else logging.INFO)
         
         file_format = CleanFileFormatter(
             fmt='[%(asctime)s] [%(levelname)s] [%(module)s:%(lineno)d] - %(message)s',

@@ -84,7 +84,32 @@ def close_verdict(quitting: bool):
     return None if quitting else False
 
 
+def _port_in_use(port: int) -> bool:
+    """True nếu đã có tiến trình nào nghe ở 127.0.0.1:port."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def main():
+    # Mở bản thứ hai khi bản cũ còn chạy là chuyện thường (bấm nhầm icon, hoặc
+    # đang chạy từ script rồi mở tiếp bản .app). Không kiểm trước thì uvicorn và
+    # http server của pywebview cùng ném "Address already in use" ở thread nền,
+    # app chết câm — nhìn từ ngoài y hệt "bản build hỏng".
+    if _port_in_use(DESKTOP_PORT):
+        msg = (
+            f"Streamloot đã chạy rồi (cổng {DESKTOP_PORT} đang bận).\n\n"
+            "Dùng biểu tượng ⤓ trên thanh menu để mở lại cửa sổ, hoặc thoát bản "
+            "đang chạy trước khi mở bản này."
+        )
+        Logger.error(f"Không khởi động được: cổng {DESKTOP_PORT} đã có tiến trình khác nghe.")
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_("Streamloot đã chạy")
+        alert.setInformativeText_(msg)
+        alert.runModal()
+        return
+
     server_thread = threading.Thread(target=start_backend, daemon=True)
     server_thread.start()
     time.sleep(1)  # give the backend a moment to bind before the page's first fetch
