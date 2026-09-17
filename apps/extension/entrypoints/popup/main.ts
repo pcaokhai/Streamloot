@@ -38,4 +38,13 @@ document.getElementById('opts')!.addEventListener('click', () => {
   void browser.runtime.openOptionsPage();
 });
 
-void render();
+// render() không bọc lỗi thì mọi exception (storage hỏng, bridge chưa sẵn
+// sàng, JSON lỗi) đều để popup nằm nguyên ở "Đang kiểm tra…" — người dùng thấy
+// một cái popup treo và không có gì để báo lại. Hiện lỗi ra ngay trong popup.
+void render().catch((err) => {
+  const status = document.getElementById('status');
+  const hint = document.getElementById('hint');
+  if (status) status.innerHTML = '<span class="dot off"></span>Popup lỗi';
+  if (hint) hint.textContent = String(err?.message ?? err);
+  console.error('Streamloot popup:', err);
+});

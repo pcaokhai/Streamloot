@@ -71,7 +71,16 @@ export type Health = 'ok' | 'unreachable' | 'rejected';
 export async function health(): Promise<Health> {
   let res: Response;
   try {
-    res = await fetch(`${await baseUrl()}/history`, { headers: jsonHeaders() });
+    // Có hạn giờ, vì `fetch` không tự bỏ cuộc bao giờ.
+    //
+    // Backend nằm ở localhost nên bình thường trả lời trong vài mili giây. Nếu
+    // cổng có người nghe nhưng không phải Streamloot (hay tiến trình đang kẹt),
+    // fetch treo vô hạn và popup đứng ở "Đang kiểm tra…" mãi mãi — người dùng
+    // đọc được đúng con số không. Quá hạn thì coi như không gọi được.
+    res = await fetch(`${await baseUrl()}/history`, {
+      headers: jsonHeaders(),
+      signal: AbortSignal.timeout(4000),
+    });
   } catch {
     return 'unreachable';
   }

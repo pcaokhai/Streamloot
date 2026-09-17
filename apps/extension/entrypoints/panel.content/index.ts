@@ -23,7 +23,16 @@ import type { Capture, FormatOption, ProgressEvent, VideoInfoPayload } from '../
  * 401. Mọi lời gọi đi qua service worker, nơi có đúng origin
  * `chrome-extension://<id>`.
  */
-const ask = <T,>(msg: unknown): Promise<T> => browser.runtime.sendMessage(msg) as Promise<T>;
+const ask = <T,>(msg: unknown): Promise<T> =>
+  // Có hạn giờ: trong MV3, service worker bị giết khi rảnh, và nếu nó chết đúng
+  // lúc đang xử lý thì `sendMessage` không bao giờ resolve — panel đứng im ở
+  // "Đang bắt đầu…" và người dùng không biết là đang chờ hay đã hỏng.
+  Promise.race([
+    browser.runtime.sendMessage(msg) as Promise<T>,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('Service worker không trả lời (thử tải lại trang)')), 15000),
+    ),
+  ]);
 
 function toPayload(cap: Capture): VideoInfoPayload {
   return {
@@ -136,11 +145,19 @@ export default defineContentScript({
       btn.onclick = async () => {
         btn.disabled = true;
         say('Đang bắt đầu…');
-        const r = await ask<{ ok: boolean; taskId?: string; error?: string }>({
-          type: 'startDownload',
-          info: payload,
-          formatId: select.value || null,
-        });
+        let r: { ok: boolean; taskId?: string; error?: string };
+        try {
+          r = await ask<{ ok: boolean; taskId?: string; error?: string }>({
+            type: 'startDownload',
+            info: payload,
+            formatId: select.value || null,
+          });
+        } catch (err) {
+          // Không bắt thì promise bị từ chối lặng lẽ và nút kẹt ở "Đang bắt đầu…".
+          say(err instanceof Error ? err.message : String(err), true);
+          btn.disabled = false;
+          return;
+        }
         if (!r.ok) {
           say(r.error ?? 'Tải thất bại', true);
           btn.disabled = false;
