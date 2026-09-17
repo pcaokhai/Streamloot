@@ -23,6 +23,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from services.download_service import DownloadService
 from services.manifest_probe import probe_duration
+from utils.proc import signal_tree
 from services.history_service import HistoryService
 from extractors.factory import ExtractorFactory
 from downloaders.ytdlp import YtDlpDownloader
@@ -470,8 +471,10 @@ def cancel_download(task_id: str):
         # acted on, until the process resumes — so a cancel on a paused task
         # would otherwise hang forever. SIGCONT first is a harmless no-op if
         # the process wasn't paused.
-        process.send_signal(signal.SIGCONT)
-        process.terminate()
+        # Cả NHÓM, không riêng yt-dlp: ffmpeg mới là tiến trình kéo byte, giết
+        # mỗi yt-dlp thì ffmpeg thành mồ côi và vẫn tải tiếp.
+        signal_tree(process, signal.SIGCONT)
+        signal_tree(process, signal.SIGTERM)
 
     return {"task_id": task_id, "message": "Cancellation requested"}
 
@@ -496,7 +499,7 @@ def pause_download(task_id: str):
     if not process or process.poll() is not None:
         raise HTTPException(status_code=409, detail="No running process for this task yet")
 
-    process.send_signal(signal.SIGSTOP)
+    signal_tree(process, signal.SIGSTOP)
     history.update_task(task_id, status="paused")
     # The download loop is a blocking `for line in process.stdout` read —
     # while paused, no new line arrives, so the frontend won't hear about
@@ -520,7 +523,7 @@ def resume_download(task_id: str):
     if not process or process.poll() is not None:
         raise HTTPException(status_code=409, detail="Paused process is no longer available — cancel and restart the download")
 
-    process.send_signal(signal.SIGCONT)
+    signal_tree(process, signal.SIGCONT)
     history.update_task(task_id, status="downloading")
     registry.broadcast_sync(task_id, {
         "status": "downloading", "description": "Downloading",
