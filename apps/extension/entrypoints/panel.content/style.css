@@ -32,4 +32,5 @@
 .sl-msg { margin-top: 8px; font-size: 12px; opacity: .8; }
 .sl-err { color: #ff9f9f; }
 .sl-bar { height: 4px; border-radius: 2px; background: #3a3a3c; margin-top: 8px; overflow: hidden; }
-.sl-bar > i { display: block; height: 100%; background: #2563eb; width: 0; transition: width .2s; }
+/* cam = tiến trình (khớp vòng quanh icon); xanh giữ cho nút hành động */
+.sl-bar > i { display: block; height: 100%; background: #f97316; width: 0; transition: width .2s; }

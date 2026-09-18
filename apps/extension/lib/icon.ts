@@ -29,7 +29,16 @@ const RING_W = 6;
  * đục thì nó lùi về sau mà vẫn giữ hình dạng.
  */
 const BASE_ALPHA_WHILE_BUSY = 0.45;
-const RING_BLUE = '#2563eb';
+/**
+ * Cam-500 cho cung tiến trình.
+ *
+ * Xanh #2563eb chìm vào chính icon (nền icon cũng xanh) nên vòng khó tách khỏi
+ * glyph. Cam nằm đối diện xanh trên vòng màu nên tách bạch ngay, và đo được là
+ * 5.74:1 trên thanh công cụ tối. Trên thanh công cụ SÁNG nó chỉ 2.14:1 — chấp
+ * nhận được vì đây là đồ hoạ đặc, không phải chữ, và đường ray mờ bên dưới đã
+ * vạch sẵn hình tròn nên mắt bám được viền kể cả khi cung nhạt.
+ */
+const RING_ACTIVE = '#f97316';
 // Khác BADGE_GRAY (#71717a) một cách cố ý, không phải lệch nhầm: vòng xám này
 // khớp màu xám tạm-dừng/chờ trong popup, còn BADGE_GRAY là màu rảnh của badge
 // — hai ngữ cảnh khác nhau, đừng gộp làm một hằng số.
@@ -105,7 +114,7 @@ export async function applyIconState(tasks: TaskRecord[], tabId?: number): Promi
       ctx.arc(SIZE / 2, SIZE / 2, r, 0, 2 * Math.PI);
       ctx.stroke();
 
-      ctx.strokeStyle = task.status === 'paused' ? RING_GRAY : RING_BLUE;
+      ctx.strokeStyle = task.status === 'paused' ? RING_GRAY : RING_ACTIVE;
       ctx.lineCap = 'round';
       ctx.beginPath();
       // Cung tối thiểu ~4% để 0% vẫn thấy được là đã bắt đầu, thay vì trống trơn.

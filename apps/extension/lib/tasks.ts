@@ -8,7 +8,15 @@
 import type { TaskRecord } from './types';
 import { TERMINAL_STATUSES } from './types';
 
-export const BADGE_BLUE = '#2563eb';
+/**
+ * Cam-700 cho nền badge, KHÔNG phải cam-500 của vòng.
+ *
+ * Badge có chữ trắng đè lên nên cần tương phản cao hơn nhiều so với một vòng
+ * đồ hoạ trơn. Đo thật: cam-500 với chữ trắng chỉ 2.80:1 (đọc không nổi),
+ * cam-600 được 3.56:1, cam-700 đạt 5.18:1 — ngang mức xanh cũ (5.17:1). Hai
+ * sắc cam khác nhau là có chủ đích, không phải lệch nhầm.
+ */
+export const BADGE_ORANGE = '#c2410c';
 /** Giữ lại vì lib/icon.ts đối chiếu màu xám của vòng với nó trong chú thích;
  *  badge không còn dùng màu xám từ khi nó chỉ nói về download. */
 export const BADGE_GRAY = '#71717a';
@@ -73,7 +81,7 @@ export function badgeFor(tasks: TaskRecord[]): { text: string; color: string } {
   // badge sinh ra để mang. Số stream đã có trong popup, nơi có chỗ giải thích
   // nó là gì.
   // Luôn toàn cục: số download không thuộc về tab nào cả.
-  return { text: live.length ? String(live.length) : '', color: BADGE_BLUE };
+  return { text: live.length ? String(live.length) : '', color: BADGE_ORANGE };
 }
 
 /**

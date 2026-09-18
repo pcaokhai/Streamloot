@@ -40,3 +40,29 @@ mang. Trong popup thì con số đó có chỗ để giải thích nó là gì.
 
 Kéo theo: `badgeFor` không còn khái niệm phạm vi theo tab (badge download là
 toàn cục), nên nó trả `{text, color}` thay vì `{text, color, perTab}`.
+
+## 6. Màu tiến trình là cam, không phải xanh
+
+**Spec** dùng xanh `#2563eb` cho mọi thứ, gồm cả vòng tiến trình và badge.
+
+**Đã làm:** cam cho tất cả những gì biểu thị TIẾN TRÌNH (vòng quanh icon, thanh
+trong popup, thanh trong panel). Xanh giữ lại cho hành động và thương hiệu (nút
+Tải, tab đang chọn, nút trong Cài đặt).
+
+**Vì sao:** người dùng báo vòng xanh chìm — nền icon cũng xanh nên vòng khó tách
+khỏi glyph. Cam nằm đối diện xanh trên vòng màu nên tách bạch ngay.
+
+**Hai sắc cam khác nhau, có chủ đích:**
+
+| Chỗ dùng | Mã | Tương phản |
+|---|---|---|
+| Vòng + thanh tiến trình | `#f97316` (cam-500) | 5.74:1 trên thanh công cụ tối |
+| Nền badge | `#c2410c` (cam-700) | 5.18:1 với chữ trắng đè lên |
+
+Badge có chữ trắng nên cần đậm hơn nhiều: đo thật thì cam-500 với chữ trắng chỉ
+đạt 2.80:1 (đọc không nổi), cam-600 được 3.56:1, cam-700 đạt 5.18:1 — ngang mức
+xanh cũ (5.17:1). Đừng gộp hai hằng số này làm một.
+
+Điểm yếu đã biết: cam-500 trên thanh công cụ SÁNG chỉ đạt 2.14:1. Chấp nhận vì
+đây là đồ hoạ đặc chứ không phải chữ, và đường ray mờ bên dưới đã vạch sẵn hình
+tròn nên mắt vẫn bám được viền.

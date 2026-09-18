@@ -1,4 +1,4 @@
-import { pickRingTask, quantize5, badgeFor, nextPollMs, iconKey, relativeTime, BADGE_BLUE, BADGE_GRAY }
+import { pickRingTask, quantize5, badgeFor, nextPollMs, iconKey, relativeTime, BADGE_ORANGE, BADGE_GRAY }
   from '../.tmp-tasks.mjs';
 
 let pass = 0, fail = 0;
@@ -52,25 +52,25 @@ t('đổi trạng thái sang tạm dừng thì phải vẽ lại',
 t('không có task thì khoá rỗng', iconKey(undefined), 'idle');
 
 // --- badgeFor (spec §5.3) ---
-t('BADGE_BLUE đúng mã spec', BADGE_BLUE, '#2563eb');
 t('BADGE_GRAY đúng mã spec', BADGE_GRAY, '#71717a');
 t('nhiều download: hiện số, nền xanh',
   badgeFor([mk('a', 'downloading', 1, '1'), mk('b', 'downloading', 2, '2')]),
-  { text: '2', color: BADGE_BLUE });
+  { text: '2', color: BADGE_ORANGE });
 t('đúng 1 download: vẫn hiện số 1',
   badgeFor([mk('a', 'downloading', 1, '1')]),
-  { text: '1', color: BADGE_BLUE });
+  { text: '1', color: BADGE_ORANGE });
 t('không tải gì: badge TRỐNG dù tab có stream bắt được',
-  badgeFor([]), { text: '', color: BADGE_BLUE });
+  badgeFor([]), { text: '', color: BADGE_ORANGE });
 t('task đã kết thúc không được tính',
   badgeFor([mk('a', 'completed', 100, '1'), mk('b', 'failed', 3, '2')]),
-  { text: '', color: BADGE_BLUE });
+  { text: '', color: BADGE_ORANGE });
 t('paused vẫn tính là đang chạy',
   badgeFor([mk('a', 'paused', 40, '1')]),
-  { text: '1', color: BADGE_BLUE });
+  { text: '1', color: BADGE_ORANGE });
 t('badge không còn khái niệm phạm vi theo tab',
   'perTab' in badgeFor([mk('a', 'downloading', 1, '1')]), false);
-t('BADGE_BLUE đúng mã spec', BADGE_BLUE, '#2563eb');
+t('BADGE_ORANGE ghim đúng mã (cam-700, đủ tương phản với chữ trắng)',
+  BADGE_ORANGE, '#c2410c');
 
 // --- nextPollMs (spec §4.2) ---
 t('có người xem thì 1s', nextPollMs({ viewersOpen: true, hasActive: true }), 1000);
