@@ -79,6 +79,13 @@ export default defineContentScript({
     let activeTask: string | null = null;
     // URL người dùng tự chọn trong danh sách stream — null là để hệ thống tự chọn.
     let chosenUrl: string | null = null;
+    /**
+     * Site này có plugin riêng không. `null` = chưa hỏi xong.
+     *
+     * Chưa biết thì coi như CÓ: giữ đường manifest vốn đã chạy, thay vì nhảy
+     * sang yt-dlp rồi lại phải vẽ lại khi câu trả lời về.
+     */
+    let sitePlugin: boolean | null = null;
     let onProgress: ((e?: ProgressEvent, err?: string) => void) | null = null;
 
     const ui = await createShadowRootUi(ctx, {
@@ -158,7 +165,11 @@ export default defineContentScript({
       // Không bắt được manifest nào không còn nghĩa là bó tay: trang vẫn có thể
       // tải được qua yt-dlp (YouTube chẳng hạn, vốn không dùng manifest file).
       // Lúc đó panel chuyển sang hỏi thẳng backend bằng URL trang.
-      const byUrl = !cap;
+      // Đi đường yt-dlp khi KHÔNG bắt được manifest, HOẶC khi site không có
+      // plugin riêng. Site có plugin thì manifest là đường đúng: plugin làm
+      // những việc riêng của site (gỡ nguỵ trang segment, header, cookie) mà
+      // hỏi yt-dlp bằng URL trang sẽ mất sạch.
+      const byUrl = !cap || sitePlugin === false;
       if (byUrl && !hasVideo()) return;
 
       root.innerHTML = '';
@@ -356,6 +367,23 @@ export default defineContentScript({
     // Panel là bề mặt xem thứ hai bên cạnh popup (spec §4.2 hàng 1) — nếu chỉ
     // popup báo viewer thì mở mỗi panel vẫn poll ở nhịp 60s.
     void browser.runtime.sendMessage({ type: 'viewerOpen' }).catch(() => {});
+
+    // Hỏi một lần: site này có plugin riêng không. Quyết định panel đi đường
+    // manifest hay đường yt-dlp, nên hỏi ngay chứ không đợi người dùng.
+    void ask<{ plugin: boolean }>({ type: 'sitePlugin', url: location.href })
+      .then((r) => {
+        const changed = sitePlugin !== r.plugin;
+        sitePlugin = r.plugin;
+        // Vẽ lại chỉ khi câu trả lời ĐỔI quyết định và chưa có gì đang tải —
+        // vẽ lại giữa chừng sẽ xoá thanh tiến trình đang chạy trên màn hình.
+        if (changed && mounted && !activeTask) {
+          const root = ui.shadow.querySelector('.sl-panel');
+          if (root instanceof HTMLElement) render(root);
+        }
+      })
+      .catch(() => {
+        sitePlugin = true; // không hỏi được thì giữ đường manifest
+      });
 
     // Video thường nạp SAU khi content script chạy (SPA, lazy player), nên một
     // lần kiểm lúc khởi động là hụt. Nghe sự kiện thay vì poll: rẻ hơn và bắt
