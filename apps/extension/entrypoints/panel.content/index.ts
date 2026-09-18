@@ -15,6 +15,7 @@
 import './style.css';
 import type { Capture, FormatOption, ProgressEvent, VideoInfoPayload } from '../../lib/types';
 import { pickCapture } from '../../lib/pick';
+import { pickAnchor, buttonPos, BTN_SIZE, BTN_PAD } from '../../lib/anchor';
 
 /**
  * Panel KHÔNG gọi HTTP trực tiếp.
@@ -71,9 +72,40 @@ function toPayload(cap: Capture): VideoInfoPayload {
 
 export default defineContentScript({
   matches: ['<all_urls>'],
+  // Đo thật: 2/3 site đích phục vụ stream qua iframe player riêng (ADR 0005
+  // §7.1), mà content script ở khung trên cùng không thấy <video> bên trong
+  // iframe. Không bật thì nút không bao giờ neo đúng chỗ trên các site đó.
+  allFrames: true,
   cssInjectionMode: 'ui',
 
   async main(ctx) {
+    // Thoát NGAY nếu khung này không có video.
+    //
+    // all_frames nghĩa là script chạy trong mọi iframe, kể cả quảng cáo và
+    // tracker — hàng chục khung trên một trang tin. Phép kiểm này gần như miễn
+    // phí và loại bỏ tuyệt đại đa số chúng. Không thoát sớm thì `all_frames`
+    // biến từ tính năng thành gánh nặng.
+    //
+    // Video có thể nạp sau, nên vẫn nghe sự kiện một lần trước khi bỏ hẳn.
+    if (!document.querySelector('video')) {
+      const wake = () => {
+        document.removeEventListener('loadedmetadata', wake, true);
+        document.removeEventListener('play', wake, true);
+        void start(ctx);
+      };
+      document.addEventListener('loadedmetadata', wake, true);
+      document.addEventListener('play', wake, true);
+      ctx.onInvalidated(() => {
+        document.removeEventListener('loadedmetadata', wake, true);
+        document.removeEventListener('play', wake, true);
+      });
+      return;
+    }
+    await start(ctx);
+  },
+});
+
+async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     let captures: Capture[] = [];
     let mounted = false;
     let activeTask: string | null = null;
@@ -95,14 +127,91 @@ export default defineContentScript({
       onMount(container) {
         const root = document.createElement('div');
         root.className = 'sl-panel';
+        root.style.display = 'none'; // đóng theo mặc định — mở khi bấm nút nổi
         container.append(root);
-        render(root);
+        container.append(fab);
         return root;
       },
       onRemove(root) {
         root?.remove();
       },
     });
+
+    const fab = document.createElement('div');
+    fab.className = 'sl-fab';
+    fab.textContent = '⤓';
+    fab.title = 'Tải video này bằng Streamloot';
+    fab.style.width = `${BTN_SIZE}px`;
+    fab.style.height = `${BTN_SIZE}px`;
+
+    let anchored: HTMLVideoElement | null = null;
+
+    /** Đo lại và đặt nút. Gọi từ observer, không từ bộ đếm. */
+    function place(): void {
+      const vids = [...document.querySelectorAll('video')] as HTMLVideoElement[];
+      const shaped = vids.map((v) => ({
+        rect: v.getBoundingClientRect(),
+        playing: !v.paused && !v.ended && v.readyState > 2,
+      }));
+      const i = pickAnchor(shaped, { width: window.innerWidth, height: window.innerHeight });
+
+      if (i < 0) {
+        // Không tìm thấy video nào dùng được: lùi về góc trên phải CỬA SỔ, không
+        // biến mất — spec §5.1.1 yêu cầu nút vẫn phải bấm được.
+        anchored = null;
+        fab.style.top = `${BTN_PAD}px`;
+        fab.style.left = `${window.innerWidth - BTN_SIZE - BTN_PAD}px`;
+        return;
+      }
+      anchored = vids[i];
+      const pos = buttonPos(shaped[i].rect, BTN_SIZE, BTN_PAD);
+      fab.style.top = `${pos.top}px`;
+      fab.style.left = `${pos.left}px`;
+    }
+
+    // Theo dõi bằng observer, KHÔNG bằng setInterval: đổi kích thước, cuộn,
+    // vào toàn màn hình, và SPA thay hẳn phần tử video — mỗi thứ có một sự
+    // kiện riêng, poll chỉ là cách né việc nghe cho đúng.
+    const ro = new ResizeObserver(() => place());
+    const io = new IntersectionObserver(() => place());
+    const mo = new MutationObserver(() => {
+      observeAll();
+      place();
+    });
+
+    function observeAll(): void {
+      ro.disconnect();
+      io.disconnect();
+      for (const v of document.querySelectorAll('video')) {
+        ro.observe(v);
+        io.observe(v);
+      }
+    }
+
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+    observeAll();
+    place();
+
+    // Cuộn và đổi cỡ cửa sổ không sinh ResizeObserver trên chính phần tử video,
+    // nên vẫn phải nghe hai sự kiện này. `passive` để không cản cuộn.
+    const onScroll = () => place();
+    window.addEventListener('scroll', onScroll, { passive: true, capture: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    document.addEventListener('fullscreenchange', onScroll, true);
+
+    ctx.onInvalidated(() => {
+      ro.disconnect();
+      io.disconnect();
+      mo.disconnect();
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+      document.removeEventListener('fullscreenchange', onScroll, true);
+    });
+
+    // Mount ngay để nút nổi lên trang — không có cách nào bấm mở panel lần
+    // đầu nếu chờ chính cú bấm đó mới mount. Panel bên trong vẫn đóng: onMount
+    // chỉ ẩn nó đi (display:none), không vẽ nội dung.
+    ui.mount();
 
     /**
      * Chọn stream để tải: DÀI NHẤT, không phải mới nhất.
@@ -184,8 +293,10 @@ export default defineContentScript({
       close.className = 'sl-x';
       close.textContent = '✕';
       close.onclick = () => {
+        // Chỉ ẩn, không ui.remove() — remove() gỡ luôn nút nổi khỏi trang
+        // (nó sống chung shadow host với panel), mà nút phải còn đó để mở lại.
         mounted = false;
-        ui.remove();
+        root.style.display = 'none';
       };
       head.append(title, close);
 
@@ -328,15 +439,20 @@ export default defineContentScript({
 
     function surface(next: Capture[]) {
       captures = next;
-      if (!captures.length && !hasVideo()) return;
-      if (!mounted) {
-        mounted = true;
-        ui.mount(); // B8 — tự nổi lên khi bắt được, không đợi người dùng đi tìm.
-      } else {
-        const root = ui.shadow.querySelector('.sl-panel');
-        if (root instanceof HTMLElement) render(root);
-      }
+      if (!mounted) return; // panel chỉ mở khi người dùng bấm nút
+      const root = ui.shadow.querySelector('.sl-panel');
+      if (root instanceof HTMLElement) render(root);
     }
+
+    fab.onclick = () => {
+      const root = ui.shadow.querySelector('.sl-panel');
+      if (!(root instanceof HTMLElement)) return;
+      // ui.mount() đã chạy ngay từ đầu (để nút hiện ra) — bấm nút chỉ còn việc
+      // mở panel ra và vẽ nội dung, không cần mount lại.
+      mounted = true;
+      root.style.display = '';
+      render(root);
+    };
 
     browser.runtime.onMessage.addListener((msg) => {
       const m = msg as {
@@ -403,5 +519,4 @@ export default defineContentScript({
       onProgress = null;
       void browser.runtime.sendMessage({ type: 'viewerClosed' }).catch(() => {});
     });
-  },
-});
+}

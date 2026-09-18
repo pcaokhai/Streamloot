@@ -34,3 +34,23 @@
 .sl-bar { height: 4px; border-radius: 2px; background: #3a3a3c; margin-top: 8px; overflow: hidden; }
 /* cam = tiến trình (khớp vòng quanh icon); xanh giữ cho nút hành động */
 .sl-bar > i { display: block; height: 100%; background: #f97316; width: 0; transition: width .2s; }
+
+/* Nút nổi: đủ rõ để thấy trên nền video bất kỳ, đủ nhỏ để không chắn nội dung. */
+.sl-fab {
+  position: fixed;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(17, 17, 17, .82);
+  color: #fff;
+  font: 600 15px/1 -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+  user-select: none;
+  /* Viền sáng để không chìm vào cảnh tối, bóng để không chìm vào cảnh sáng. */
+  border: 1px solid rgba(255, 255, 255, .35);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .45);
+  transition: background .15s, transform .15s;
+}
+.sl-fab:hover { background: #f97316; transform: scale(1.08); }
