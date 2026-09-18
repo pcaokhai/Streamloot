@@ -35,6 +35,20 @@
 /* cam = tiến trình (khớp vòng quanh icon); xanh giữ cho nút hành động */
 .sl-bar > i { display: block; height: 100%; background: #f97316; width: 0; transition: width .2s; }
 
+.sl-list { max-height: 320px; overflow-y: auto; margin: 6px 0; }
+.sl-group {
+  font-size: 11px; opacity: .65; margin: 8px 0 2px; letter-spacing: .02em;
+}
+.sl-row-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 7px 8px; border-radius: 6px; cursor: pointer;
+}
+.sl-row-item:hover { background: rgba(249, 115, 22, .16); }
+.sl-row-label { font-weight: 600; }
+.sl-row-detail { font-size: 11px; opacity: .7; white-space: nowrap; }
+/* Dòng yt-dlp tự chọn: đánh dấu nhẹ, không cướp sự chú ý khỏi các dòng khác. */
+.sl-rec .sl-row-label::after { content: ' ★'; color: #f97316; }
+
 /* Nút nổi: đủ rõ để thấy trên nền video bất kỳ, đủ nhỏ để không chắn nội dung. */
 .sl-fab {
   position: fixed;

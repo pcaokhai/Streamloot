@@ -13,9 +13,11 @@
  * đáng tin là những gì service worker quan sát được từ network.
  */
 import './style.css';
-import type { Capture, FormatOption, ProgressEvent, VideoInfoPayload } from '../../lib/types';
+import type { Capture, FormatOption, VideoInfoPayload } from '../../lib/types';
 import { pickCapture } from '../../lib/pick';
 import { pickAnchor, buttonPos, BTN_SIZE, BTN_PAD } from '../../lib/anchor';
+import { groupFormats } from '../../lib/formats';
+import type { FormatRow } from '../../lib/formats';
 
 /**
  * Panel KHÔNG gọi HTTP trực tiếp.
@@ -108,7 +110,6 @@ export default defineContentScript({
 async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     let captures: Capture[] = [];
     let mounted = false;
-    let activeTask: string | null = null;
     // URL người dùng tự chọn trong danh sách stream — null là để hệ thống tự chọn.
     let chosenUrl: string | null = null;
     /**
@@ -118,7 +119,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
      * sang yt-dlp rồi lại phải vẽ lại khi câu trả lời về.
      */
     let sitePlugin: boolean | null = null;
-    let onProgress: ((e?: ProgressEvent, err?: string) => void) | null = null;
 
     const ui = await createShadowRootUi(ctx, {
       name: 'streamloot-panel',
@@ -328,31 +328,74 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         };
       }
 
-      const row = document.createElement('div');
-      row.className = 'sl-row';
-      const select = document.createElement('select');
-      select.innerHTML = '<option value="">Chất lượng tốt nhất</option>';
-      const btn = document.createElement('button');
-      btn.className = 'sl-btn';
-      btn.textContent = 'Tải';
-      row.append(select, btn);
+      const list = document.createElement('div');
+      list.className = 'sl-list';
 
       const msg = document.createElement('div');
       msg.className = 'sl-msg';
-      const bar = document.createElement('div');
-      bar.className = 'sl-bar';
-      const fill = document.createElement('i');
-      bar.append(fill);
-      bar.style.display = 'none';
 
       root.append(head, sub);
       if (picker) root.append(picker);
-      root.append(row, msg, bar);
+      root.append(list, msg);
 
       const say = (text: string, isError = false) => {
         msg.textContent = text;
         msg.className = isError ? 'sl-msg sl-err' : 'sl-msg';
       };
+
+      /** Một dòng bấm được. Bấm là tải luôn — không có bước xác nhận (§5.1). */
+      function addRow(row: FormatRow): void {
+        const el = document.createElement('div');
+        el.className = row.recommended ? 'sl-row-item sl-rec' : 'sl-row-item';
+        const left = document.createElement('span');
+        left.className = 'sl-row-label';
+        left.textContent = row.label;
+        const right = document.createElement('span');
+        right.className = 'sl-row-detail';
+        right.textContent = row.detail;
+        el.append(left, right);
+        el.onclick = () => void startDownload(row.formatId);
+        list.append(el);
+      }
+
+      function addGroup(title: string, rows: FormatRow[]): void {
+        if (!rows.length) return;
+        const h = document.createElement('div');
+        h.className = 'sl-group';
+        h.textContent = title;
+        list.append(h);
+        for (const r of rows) addRow(r);
+      }
+
+      /**
+       * Gửi lệnh tải rồi ĐÓNG panel (§5.1).
+       *
+       * Panel là bộ chọn format, không phải trình quản lý: nó không theo dõi gì
+       * sau khi bàn giao. Muốn xem tiến trình thì mở popup, hoặc nhìn vòng trên
+       * icon. Để panel ở lại là chắn mất video người dùng đang xem.
+       */
+      async function startDownload(formatId: string): Promise<void> {
+        say('Đang bắt đầu…');
+        let r: { ok: boolean; error?: string };
+        try {
+          r = await ask<{ ok: boolean; error?: string }>(
+            byUrl
+              ? { type: 'startByUrl', url: location.href, formatId }
+              : { type: 'startDownload', info: payload!, formatId },
+          );
+        } catch (err) {
+          say(err instanceof Error ? err.message : String(err), true);
+          return;
+        }
+        if (!r.ok) {
+          // Lỗi thì GIỮ panel mở: đóng lại là người dùng mất cả thông báo lẫn
+          // danh sách vừa chọn.
+          say(r.error ?? 'Tải thất bại', true);
+          return;
+        }
+        mounted = false;
+        ui.remove();
+      }
 
       // Nạp danh sách chất lượng ngay — người dùng chọn TRƯỚC khi bàn giao, đúng
       // cách IDM và Cốc Cốc làm (ADR 0005 §2.5d).
@@ -370,62 +413,26 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       void askFormats.then((r) => {
         if (!r.ok) {
           if (byUrl) {
-            // Không có manifest VÀ yt-dlp cũng chiều: thật sự bó tay. Nói thẳng,
-            // đừng để người dùng bấm Tải rồi mới biết.
             say(r.error ?? 'Trang này chưa tải được', true);
-            btn.disabled = true;
             return;
           }
-          // Còn manifest thì vẫn tải được: backend tự chọn chất lượng tốt nhất.
+          // Không lấy được danh sách KHÔNG chặn việc tải (§7): vẫn cho một dòng
+          // để backend tự chọn chất lượng tốt nhất.
           say(r.error ?? 'Không lấy được danh sách chất lượng');
+          addGroup('🎬 VIDEO', [{
+            formatId: '', label: 'Chất lượng tốt nhất', detail: 'backend tự chọn', recommended: true,
+          }]);
           return;
         }
-        const heights = [...new Set((r.formats ?? []).map((f) => f.height).filter(Boolean))] as number[];
-        heights.sort((a, b) => b - a);
-        for (const h of heights) {
-          const o = document.createElement('option');
-          o.value = String(h);
-          o.textContent = `${h}p`;
-          select.append(o);
+        const { video, audio } = groupFormats(r.formats ?? []);
+        addGroup('🎬 VIDEO', video);
+        addGroup('🎵 ÂM THANH', audio);
+        if (!video.length && !audio.length) {
+          say('Không có chất lượng nào để chọn', true);
+        } else {
+          say('Bấm một dòng để tải');
         }
-        say(heights.length ? `${heights.length} chất lượng` : 'Chỉ có một chất lượng');
       });
-
-      btn.onclick = async () => {
-        btn.disabled = true;
-        say('Đang bắt đầu…');
-        let r: { ok: boolean; taskId?: string; error?: string };
-        try {
-          r = await ask<{ ok: boolean; taskId?: string; error?: string }>(
-            byUrl
-              ? { type: 'startByUrl', url: location.href, formatId: select.value || null }
-              : { type: 'startDownload', info: payload!, formatId: select.value || null },
-          );
-        } catch (err) {
-          // Không bắt thì promise bị từ chối lặng lẽ và nút kẹt ở "Đang bắt đầu…".
-          say(err instanceof Error ? err.message : String(err), true);
-          btn.disabled = false;
-          return;
-        }
-        if (!r.ok) {
-          say(r.error ?? 'Tải thất bại', true);
-          btn.disabled = false;
-          return;
-        }
-        // Tiến trình do service worker đẩy về (xem onMessage 'progress').
-        activeTask = r.taskId ?? null;
-        onProgress = (e, err) => {
-          if (err) {
-            say(err, true);
-            btn.disabled = false;
-            return;
-          }
-          bar.style.display = '';
-          fill.style.width = `${Math.round(e?.completed ?? 0)}%`;
-          say(`${e?.description ?? e?.status ?? ''} · ${e?.speed ?? ''}`.trim());
-          if (e && ['completed', 'failed', 'cancelled'].includes(e.status)) btn.disabled = false;
-        };
-      };
     }
 
     /** Trang có thẻ <video> thật sự phát được không. */
@@ -455,15 +462,8 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     };
 
     browser.runtime.onMessage.addListener((msg) => {
-      const m = msg as {
-        type?: string;
-        captures?: Capture[];
-        taskId?: string;
-        event?: ProgressEvent;
-        error?: string;
-      };
+      const m = msg as { type?: string; captures?: Capture[] };
       if (m?.type === 'captures' && m.captures) surface(m.captures);
-      if (m?.type === 'progress' && m.taskId === activeTask) onProgress?.(m.event, m.error);
     });
 
     // Service worker có thể đã bắt được manifest TRƯỚC khi content script nạp
@@ -490,9 +490,9 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       .then((r) => {
         const changed = sitePlugin !== r.plugin;
         sitePlugin = r.plugin;
-        // Vẽ lại chỉ khi câu trả lời ĐỔI quyết định và chưa có gì đang tải —
-        // vẽ lại giữa chừng sẽ xoá thanh tiến trình đang chạy trên màn hình.
-        if (changed && mounted && !activeTask) {
+        // Vẽ lại chỉ khi câu trả lời ĐỔI quyết định — panel không theo dõi tiến
+        // trình nữa nên không còn gì để giữ nguyên khi đang tải.
+        if (changed && mounted) {
           const root = ui.shadow.querySelector('.sl-panel');
           if (root instanceof HTMLElement) render(root);
         }
@@ -516,7 +516,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     ctx.onInvalidated(() => {
       document.removeEventListener('loadedmetadata', onVideoReady, true);
       document.removeEventListener('play', onVideoReady, true);
-      onProgress = null;
       void browser.runtime.sendMessage({ type: 'viewerClosed' }).catch(() => {});
     });
 }
