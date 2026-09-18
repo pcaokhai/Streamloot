@@ -155,16 +155,20 @@ export default defineContentScript({
         '| thời lượng <video>:', pageDuration(),
         '| chọn:', cap?.host,
       );
-      // pickCapture chỉ trả rỗng khi KHÔNG còn ứng viên nào — nó không bao giờ
-      // bắt panel đợi một phép đo (xem lib/pick.ts bước 5).
-      if (!cap) return;
+      // Không bắt được manifest nào không còn nghĩa là bó tay: trang vẫn có thể
+      // tải được qua yt-dlp (YouTube chẳng hạn, vốn không dùng manifest file).
+      // Lúc đó panel chuyển sang hỏi thẳng backend bằng URL trang.
+      const byUrl = !cap;
+      if (byUrl && !hasVideo()) return;
 
       root.innerHTML = '';
       const head = document.createElement('div');
       head.className = 'sl-head';
       const title = document.createElement('div');
       title.className = 'sl-title';
-      title.textContent = `Streamloot — ${captures.length} stream`;
+      title.textContent = byUrl
+        ? 'Streamloot — trang này'
+        : `Streamloot — ${captures.length} stream`;
       const close = document.createElement('button');
       close.className = 'sl-x';
       close.textContent = '✕';
@@ -176,13 +180,15 @@ export default defineContentScript({
 
       const sub = document.createElement('div');
       sub.className = 'sl-sub';
-      sub.textContent = `${cap.host} · ${fmtDur(cap.durationSec)}`;
+      sub.textContent = byUrl
+        ? `${location.hostname} · hỏi qua yt-dlp`
+        : `${cap!.host} · ${fmtDur(cap!.durationSec)}`;
 
       // Nhiều stream thì cho chọn tay: phép đo thời lượng đúng gần hết các lần,
       // nhưng khi nó sai thì người dùng phải có đường sửa, chứ không phải tải về
       // rồi mới biết nhầm.
       let picker: HTMLSelectElement | null = null;
-      if (captures.length > 1) {
+      if (!byUrl && captures.length > 1) {
         picker = document.createElement('select');
         const ranked = [...captures].sort(
           (a, b) => (b.durationSec ?? -1) - (a.durationSec ?? -1),
@@ -191,7 +197,7 @@ export default defineContentScript({
           const o = document.createElement('option');
           o.value = c.url;
           o.textContent = `${c.host} · ${fmtDur(c.durationSec)}`;
-          o.selected = c.url === cap.url;
+          o.selected = c.url === cap!.url;
           picker.append(o);
         }
         picker.onchange = () => {
@@ -228,14 +234,27 @@ export default defineContentScript({
 
       // Nạp danh sách chất lượng ngay — người dùng chọn TRƯỚC khi bàn giao, đúng
       // cách IDM và Cốc Cốc làm (ADR 0005 §2.5d).
-      const payload = toPayload(cap);
-      say('Đang lấy danh sách chất lượng…');
-      void ask<{ ok: boolean; formats?: FormatOption[]; error?: string }>({
-        type: 'listFormats',
-        info: payload,
-      }).then((r) => {
+      const payload = cap ? toPayload(cap) : null;
+      say(byUrl ? 'Đang hỏi yt-dlp xem trang này tải được không…' : 'Đang lấy danh sách chất lượng…');
+      const askFormats = byUrl
+        ? ask<{ ok: boolean; formats?: FormatOption[]; error?: string }>({
+            type: 'formatsByUrl',
+            url: location.href,
+          })
+        : ask<{ ok: boolean; formats?: FormatOption[]; error?: string }>({
+            type: 'listFormats',
+            info: payload!,
+          });
+      void askFormats.then((r) => {
         if (!r.ok) {
-          // Không chặn việc tải: backend vẫn tự chọn được chất lượng tốt nhất.
+          if (byUrl) {
+            // Không có manifest VÀ yt-dlp cũng chiều: thật sự bó tay. Nói thẳng,
+            // đừng để người dùng bấm Tải rồi mới biết.
+            say(r.error ?? 'Trang này chưa tải được', true);
+            btn.disabled = true;
+            return;
+          }
+          // Còn manifest thì vẫn tải được: backend tự chọn chất lượng tốt nhất.
           say(r.error ?? 'Không lấy được danh sách chất lượng');
           return;
         }
@@ -255,11 +274,11 @@ export default defineContentScript({
         say('Đang bắt đầu…');
         let r: { ok: boolean; taskId?: string; error?: string };
         try {
-          r = await ask<{ ok: boolean; taskId?: string; error?: string }>({
-            type: 'startDownload',
-            info: payload,
-            formatId: select.value || null,
-          });
+          r = await ask<{ ok: boolean; taskId?: string; error?: string }>(
+            byUrl
+              ? { type: 'startByUrl', url: location.href, formatId: select.value || null }
+              : { type: 'startDownload', info: payload!, formatId: select.value || null },
+          );
         } catch (err) {
           // Không bắt thì promise bị từ chối lặng lẽ và nút kẹt ở "Đang bắt đầu…".
           say(err instanceof Error ? err.message : String(err), true);
@@ -287,9 +306,18 @@ export default defineContentScript({
       };
     }
 
+    /** Trang có thẻ <video> thật sự phát được không. */
+    function hasVideo(): boolean {
+      for (const v of document.querySelectorAll('video')) {
+        const el = v as HTMLVideoElement;
+        if (el.currentSrc || el.src || Number.isFinite(el.duration)) return true;
+      }
+      return false;
+    }
+
     function surface(next: Capture[]) {
       captures = next;
-      if (!captures.length) return;
+      if (!captures.length && !hasVideo()) return;
       if (!mounted) {
         mounted = true;
         ui.mount(); // B8 — tự nổi lên khi bắt được, không đợi người dùng đi tìm.
@@ -319,6 +347,7 @@ export default defineContentScript({
     try {
       const existing = (await browser.runtime.sendMessage({ type: 'getCaptures' })) as Capture[];
       if (existing?.length) surface(existing);
+      else surface([]); // không có manifest nhưng trang có thể vẫn có <video>
     } catch (err) {
       if (isOrphaned(err)) console.warn('[Streamloot]', RELOAD_PAGE_MSG);
       else console.warn('[Streamloot] không hỏi được stream đã bắt:', err);
@@ -328,7 +357,21 @@ export default defineContentScript({
     // popup báo viewer thì mở mỗi panel vẫn poll ở nhịp 60s.
     void browser.runtime.sendMessage({ type: 'viewerOpen' }).catch(() => {});
 
+    // Video thường nạp SAU khi content script chạy (SPA, lazy player), nên một
+    // lần kiểm lúc khởi động là hụt. Nghe sự kiện thay vì poll: rẻ hơn và bắt
+    // đúng khoảnh khắc video sẵn sàng.
+    //
+    // Chỉ gọi khi CHƯA mount: mount rồi mà vẽ lại thì nó hỏi format lần nữa và
+    // có thể xoá trạng thái đang tải trên màn hình.
+    const onVideoReady = () => {
+      if (!mounted) surface(captures);
+    };
+    document.addEventListener('loadedmetadata', onVideoReady, true);
+    document.addEventListener('play', onVideoReady, true);
+
     ctx.onInvalidated(() => {
+      document.removeEventListener('loadedmetadata', onVideoReady, true);
+      document.removeEventListener('play', onVideoReady, true);
       onProgress = null;
       void browser.runtime.sendMessage({ type: 'viewerClosed' }).catch(() => {});
     });

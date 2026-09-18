@@ -154,6 +154,19 @@ export async function startDownload(
 }
 
 /**
+ * Hỏi yt-dlp xem trang này có tải được không, và có những chất lượng nào.
+ *
+ * Khác `listFormats`: cái kia nhận VideoInfo đã dựng sẵn từ manifest extension
+ * bắt được, còn cái này chỉ có URL trang. Backend tự chọn extractor — site nào
+ * yt-dlp hỗ trợ sẵn thì chỉ hỏi metadata, không mở trình duyệt.
+ *
+ * Trả về cùng hình dạng với `listFormats` nên panel vẽ lại y hệt.
+ */
+export function getFormatsByUrl(url: string): Promise<{ title: string; formats: FormatOption[] }> {
+  return get<{ title: string; formats: FormatOption[] }>(`/formats?url=${encodeURIComponent(url)}`);
+}
+
+/**
  * B9 — đường lùi: gửi URL trần để app tự extract bằng plugin headless.
  * Dùng khi extension không bắt được manifest (site cần tương tác mới lộ stream,
  * ADR 0005 §2.3). Chậm hơn nhiều nhưng còn hơn là bó tay.

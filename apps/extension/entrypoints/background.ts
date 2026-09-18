@@ -165,6 +165,8 @@ export default defineBackground(() => {
       info?: VideoInfoPayload;
       formatId?: string | null;
       taskId?: string;
+      /** URL trang, cho đường hỏi yt-dlp trực tiếp (formatsByUrl / startByUrl). */
+      url?: string;
     };
 
     if (m?.type === 'getCaptures') {
@@ -208,6 +210,22 @@ export default defineBackground(() => {
         .catch((e: unknown) => ({ ok: false as const, error: errorText(e) }));
     }
 
+    if (m?.type === 'formatsByUrl' && typeof m.url === 'string') {
+      return formatsByUrl(m.url);
+    }
+
+    if (m?.type === 'startByUrl' && typeof m.url === 'string') {
+      const tabId = sender.tab?.id;
+      return api
+        .startDownloadByUrl(m.url, m.formatId ?? null)
+        .then(({ task_id }) => {
+          void pumpProgress(task_id, tabId);
+          runTick();
+          return { ok: true as const, taskId: task_id };
+        })
+        .catch((e: unknown) => ({ ok: false as const, error: errorText(e) }));
+    }
+
     if (m?.type === 'health') {
       return api.health().then((state) => ({ state }));
     }
@@ -223,6 +241,40 @@ export default defineBackground(() => {
     }
     return undefined;
   });
+
+  /**
+   * Nhớ kết quả hỏi yt-dlp theo URL trang.
+   *
+   * Panel hỏi tự động trên MỌI trang có video, nên không có bộ nhớ đệm thì mỗi
+   * lần panel vẽ lại là một lượt gọi ra internet — và trang yt-dlp không hỗ trợ
+   * vẫn tốn nguyên một lượt tải trang rồi mới bỏ cuộc. Nhớ cả lần THẤT BẠI:
+   * "site này không tải được" cũng là một câu trả lời, hỏi lại không đổi.
+   *
+   * Sống trong RAM của service worker, mất khi MV3 thu hồi worker — chấp nhận
+   * được, lúc đó hỏi lại một lần là xong.
+   */
+  const formatCache = new Map<string, { ok: boolean; title?: string; formats?: unknown; error?: string }>();
+  const FORMAT_CACHE_MAX = 40;
+
+  async function formatsByUrl(url: string) {
+    const hit = formatCache.get(url);
+    if (hit) return hit;
+    let result;
+    try {
+      const r = await api.getFormatsByUrl(url);
+      result = { ok: true as const, title: r.title, formats: r.formats };
+    } catch (e: unknown) {
+      result = { ok: false as const, error: errorText(e) };
+    }
+    // Trần đơn giản: xoá mục cũ nhất khi đầy. Map giữ thứ tự chèn nên cái đầu
+    // tiên là cái cũ nhất.
+    if (formatCache.size >= FORMAT_CACHE_MAX) {
+      const oldest = formatCache.keys().next().value;
+      if (oldest !== undefined) formatCache.delete(oldest);
+    }
+    formatCache.set(url, result);
+    return result;
+  }
 
   const ALARM = 'streamloot-poll';
   /** Số bề mặt đang mở (popup, panel). Quyết định nhịp 1s hay 60s (spec §4.2). */
