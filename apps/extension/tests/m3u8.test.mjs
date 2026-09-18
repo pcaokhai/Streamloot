@@ -1,4 +1,4 @@
-import { parseMaster, variantsToFormats, isMaster, isSubtitlePlaylist, isLive, totalDuration } from '../.tmp-m3u8.mjs';
+import { parseMaster, variantsToFormats, isMaster, isSubtitlePlaylist, isLive, totalDuration, singleFormat } from '../.tmp-m3u8.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -76,6 +76,16 @@ lo/i.m3u8`;
 const nf = variantsToFormats(parseMaster(NORES, BASE));
 t('thiếu RESOLUTION vẫn suy được cấp từ bandwidth', () => nf.map((f) => f.height), [720, 360]);
 t('thiếu RESOLUTION vẫn chọn được dòng tốt nhất', () => nf.map((f) => f.recommended), [true, false]);
+
+// --- media playlist: một dòng, không cần backend ---
+t('một luồng vẫn ra được dòng bấm được',
+  () => { const f = singleFormat('https://cdn.example.test/v.m3u8', 125); return [f.url, f.recommended, f.vcodec]; },
+  ['https://cdn.example.test/v.m3u8', true, 'avc1']);
+t('không đo được thời lượng thì để trống, không bịa',
+  () => singleFormat('https://cdn.example.test/v.m3u8', null).resolution, '');
+t('hình dạng khớp FormatOption',
+  () => Object.keys(singleFormat('https://x.example.test/a.m3u8', 60)).sort(),
+  ['acodec', 'ext', 'filesize', 'format_id', 'height', 'recommended', 'resolution', 'url', 'vcodec'].sort());
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

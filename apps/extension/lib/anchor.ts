@@ -83,7 +83,7 @@ export function buttonPos(rect: Rect, size: number, pad: number): { top: number;
 }
 
 /** Bề rộng panel, px — phải khớp `.sl-panel { width }` trong style.css. */
-export const PANEL_W = 320;
+export const PANEL_W = 300;
 /** Khe giữa nút và panel, px. */
 export const PANEL_GAP = 6;
 /** Phần panel tối thiểu phải lộ ra trong khung nhìn, px. */

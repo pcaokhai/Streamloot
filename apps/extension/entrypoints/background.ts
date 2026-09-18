@@ -17,7 +17,7 @@ import { applyIconState, flashCompleted } from '../lib/icon';
 import { cacheTasks } from '../lib/cache';
 import { nextPollMs, pickRingTask, shouldCacheFormatFailure } from '../lib/tasks';
 import { canSetHeaders, dirFilter, withHeaders } from '../lib/dnr';
-import { isMaster, isSubtitlePlaylist, parseMaster, variantsToFormats } from '../lib/m3u8';
+import { isLive, isMaster, isSubtitlePlaylist, parseMaster, singleFormat, totalDuration, variantsToFormats } from '../lib/m3u8';
 import type { Capture, FormatOption, TaskRecord, VideoInfoPayload } from '../lib/types';
 
 const MANIFEST_URL = /\.(m3u8|mpd)(\?|$)/i;
@@ -277,6 +277,9 @@ export default defineBackground(() => {
  * master) — khác hẳn `[]` nghĩa là "đọc được và thật sự không có biến thể nào".
  * Người gọi phải phân biệt hai cái: một cái lùi về backend, một cái thì không.
  */
+/** Quá ngưỡng này thì bỏ đường nhanh, lùi về backend. */
+const MANIFEST_TIMEOUT_MS = 4000;
+
 async function variantsFromManifest(info: VideoInfoPayload): Promise<FormatOption[] | null> {
   if (!canSetHeaders() || !info.m3u8_url) return null;
   const headers: Record<string, string> = {};
@@ -288,9 +291,18 @@ async function variantsFromManifest(info: VideoInfoPayload): Promise<FormatOptio
     text = await withHeaders(
       [{ urlFilter: dirFilter(info.m3u8_url), headers }],
       async () => {
-        const res = await fetch(info.m3u8_url, { credentials: 'omit' });
-        if (!res.ok) throw new Error(`manifest trả ${res.status}`);
-        return res.text();
+        // Hạn giờ BẮT BUỘC: `fetch` không tự bỏ cuộc, mà CDN video treo request
+        // là chuyện thường. Không có nó thì panel đứng ở "Đang lấy danh sách…"
+        // vô hạn thay vì lùi về backend sau vài giây.
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), MANIFEST_TIMEOUT_MS);
+        try {
+          const res = await fetch(info.m3u8_url, { credentials: 'omit', signal: ctl.signal });
+          if (!res.ok) throw new Error(`manifest trả ${res.status}`);
+          return await res.text();
+        } finally {
+          clearTimeout(timer);
+        }
       },
     );
   } catch (err) {
@@ -301,7 +313,14 @@ async function variantsFromManifest(info: VideoInfoPayload): Promise<FormatOptio
   // Playlist phụ đề cũng là .m3u8 hợp lệ — mời tải nó là đưa người dùng một
   // tệp .vtt và gọi đó là video.
   if (isSubtitlePlaylist(text)) return null;
-  if (!isMaster(text)) return null; // media playlist một luồng: không có gì để chọn
+  if (!isMaster(text)) {
+    // Media playlist: không có biến thể để chọn, nhưng vẫn tải được. Trả một
+    // dòng thay vì lùi về backend — backend cũng chỉ trả đúng một lựa chọn cho
+    // luồng này, mà lại bắt đợi yt-dlp và đòi app phải đang chạy.
+    return totalDuration(text) !== null || isLive(text)
+      ? [singleFormat(info.m3u8_url, totalDuration(text))]
+      : null;
+  }
   const formats = variantsToFormats(parseMaster(text, info.m3u8_url));
   return formats.length ? formats : null;
 }

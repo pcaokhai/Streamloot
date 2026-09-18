@@ -157,3 +157,24 @@ export function variantsToFormats(variants: Variant[]): import('./types').Format
     };
   });
 }
+
+/**
+ * Một dòng duy nhất cho media playlist (không có biến thể để chọn).
+ *
+ * Vẫn hơn là lùi về backend: backend chỉ trả đúng một lựa chọn cho cùng luồng
+ * này, mà lại bắt người dùng đợi yt-dlp — và nếu app chưa chạy thì không có gì
+ * để hiện cả. Thời lượng đọc ngay từ playlist nên nhãn vẫn nói được điều có ích.
+ */
+export function singleFormat(url: string, durationSec: number | null): import('./types').FormatOption {
+  return {
+    format_id: '',
+    ext: 'mp4',
+    resolution: durationSec ? `${Math.round(durationSec / 60)} phút` : '',
+    height: null,
+    filesize: null,
+    vcodec: 'avc1',
+    acodec: 'mp4a',
+    recommended: true,
+    url,
+  };
+}

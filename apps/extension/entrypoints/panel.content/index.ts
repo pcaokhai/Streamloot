@@ -314,18 +314,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     }
 
 
-    const fmtDur = (sec?: number | null): string => {
-      // undefined = chưa đo xong; null = đo rồi mà không ra. Gộp hai cái làm một
-      // là nói dối: người dùng ngồi đợi một phép đo đã kết thúc từ lâu.
-      if (sec === undefined) return 'đang đo…';
-      if (sec === null || sec <= 0) return 'không đo được';
-      if (typeof sec !== 'number') return 'không đo được';
-      const h = Math.floor(sec / 3600);
-      const m = Math.floor((sec % 3600) / 60);
-      const s = Math.floor(sec % 60);
-      return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-               : `${m}:${String(s).padStart(2, '0')}`;
-    };
 
     function render(root: HTMLElement) {
       const cap = pickCapture(captures, {
@@ -378,37 +366,13 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       };
       head.append(logo, title, close);
 
-      // Nhiều stream thì cho chọn tay: phép đo thời lượng đúng gần hết các lần,
-      // nhưng khi nó sai thì người dùng phải có đường sửa, chứ không phải tải về
-      // rồi mới biết nhầm.
-      let picker: HTMLSelectElement | null = null;
-      if (!byUrl && captures.length > 1) {
-        picker = document.createElement('select');
-        const ranked = [...captures].sort(
-          (a, b) => (b.durationSec ?? -1) - (a.durationSec ?? -1),
-        );
-        for (const c of ranked) {
-          const o = document.createElement('option');
-          o.value = c.url;
-          o.textContent = `${c.host} · ${fmtDur(c.durationSec)}`;
-          o.selected = c.url === cap!.url;
-          picker.append(o);
-        }
-        picker.onchange = () => {
-          chosenUrl = picker!.value;
-          render(root);
-        };
-      }
-
       const list = document.createElement('div');
       list.className = 'sl-list';
 
       const msg = document.createElement('div');
       msg.className = 'sl-msg';
 
-      root.append(head);
-      if (picker) root.append(picker);
-      root.append(list, msg);
+      root.append(head, list, msg);
 
       const say = (text: string, isError = false) => {
         msg.textContent = text;
@@ -539,6 +503,11 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         } else {
           say('Bấm một dòng để tải');
         }
+      }).catch((err: unknown) => {
+        // THIẾU nhánh này là panel đứng mãi ở "Đang lấy danh sách chất lượng…":
+        // ask() có hạn giờ và ném khi service worker không trả lời, mà promise
+        // bị ném không ai bắt thì giao diện không bao giờ đổi. Đã gặp thật.
+        say(err instanceof Error ? err.message : String(err), true);
       });
     }
 

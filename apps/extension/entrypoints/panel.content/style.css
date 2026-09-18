@@ -5,7 +5,7 @@
      cứng vào góc cửa sổ, kẻo panel mở ở xa chỗ người dùng vừa bấm. */
   position: fixed;
   z-index: 2147483647;
-  width: 320px; /* khớp PANEL_W trong lib/anchor.ts */
+  width: 300px; /* khớp PANEL_W trong lib/anchor.ts */
   max-height: 70vh;
   overflow: visible;
   box-sizing: border-box;
@@ -13,7 +13,7 @@
   border-radius: 12px;
   background: #2b2b2e;
   color: #f2f2f7;
-  font: 15px/1.4 -apple-system, system-ui, sans-serif;
+  font: 14px/1.4 -apple-system, system-ui, sans-serif;
   box-shadow: 0 10px 36px rgb(0 0 0 / 50%);
 }
 /* Mũi tên nhỏ chỉ lên nút, như popover của Cốc Cốc. Panel căn mép phải theo
@@ -37,7 +37,7 @@
   display: inline-flex; align-items: center; justify-content: center;
   background: #f97316; color: #fff; font-weight: 700; font-size: 15px;
 }
-.sl-title { font-weight: 700; font-size: 18px; flex: 1; }
+.sl-title { font-weight: 700; font-size: 16px; flex: 1; }
 .sl-x { cursor: pointer; opacity: .6; background: none; border: 0; color: inherit; font-size: 18px; padding: 0 2px; }
 .sl-x:hover { opacity: 1; }
 .sl-msg { padding: 6px 14px 2px; font-size: 12px; opacity: .7; }
@@ -52,16 +52,17 @@
 .sl-list { max-height: 320px; overflow-y: auto; padding: 4px 6px 0; }
 .sl-group {
   display: flex; align-items: center; gap: 8px;
-  padding: 10px 8px 6px; font-size: 14px; font-weight: 600; opacity: .55;
+  padding: 9px 8px 4px; font-size: 13px; font-weight: 600; opacity: .55;
   letter-spacing: .04em;
 }
 .sl-group-ic { font-size: 16px; width: 18px; text-align: center; }
 /* Ba cột: tên cấp (rộng) · độ phân giải · đuôi — thẳng cột giữa các dòng. */
 .sl-row-item {
-  display: grid; grid-template-columns: 1fr 90px 60px; align-items: center;
-  padding: 9px 8px 9px 34px; border-radius: 8px; cursor: pointer;
+  display: grid; grid-template-columns: 1fr 76px 52px; align-items: center;
+  padding: 8px 10px 8px 30px; border-radius: 6px; cursor: pointer;
 }
-.sl-row-item:hover { background: rgba(249, 115, 22, .18); }
+.sl-row-item:hover { background: #f97316; color: #fff; }
+.sl-row-item:hover .sl-row-res, .sl-row-item:hover .sl-row-ext { opacity: 1; }
 /* Đang gửi lệnh tải: khoá dòng lại để bấm dồn không sinh hai lần tải. */
 .sl-row-item.sl-pending { opacity: .5; cursor: default; pointer-events: none; }
 .sl-row-label { font-weight: 700; }

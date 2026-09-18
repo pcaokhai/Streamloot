@@ -121,3 +121,25 @@ Hai bài học khác lấy từ cùng nguồn, đã áp dụng:
 Chưa áp dụng, ghi lại để cân nhắc: họ dùng `offscreen` (reason `WORKERS`) để
 chạy Web Worker vì service worker MV3 không spawn được worker — mình không cần,
 việc tải nặng đã nằm ở backend Python.
+
+## 9. Panel bỏ ô chọn stream; luồng đơn không cần backend
+
+Thử tay 2026-09-18: panel treo vĩnh viễn ở "Đang lấy danh sách chất lượng…".
+Nguyên nhân không phải chậm — `askFormats.then(...)` thiếu `.catch()`, nên khi
+`ask()` hết hạn giờ 15s (service worker không trả lời) promise bị ném không ai
+bắt và giao diện không bao giờ đổi. Thêm `.catch` hiện lỗi.
+
+Kèm theo: `fetch` master m3u8 chưa có hạn giờ — CDN treo request là chuyện
+thường, mà `fetch` thì không tự bỏ cuộc. Thêm `AbortController` 4s rồi lùi về
+backend.
+
+Bỏ ô `<select>` chọn stream khỏi panel (spec §5.1 không có nó, bản tham chiếu
+cũng không): panel là bộ chọn FORMAT, thêm một bộ chọn nữa là hai quyết định
+chồng nhau trong một khung nhỏ. Vẫn tự xếp hạng theo thời lượng như cũ; đường
+chọn tay trong `pick.ts` giữ nguyên, chỉ không lộ ra giao diện. Đánh đổi: khi
+phép đo chọn nhầm stream, người dùng không còn đường sửa tại chỗ — nếu gặp
+thật thì đưa lại dưới dạng một dòng phụ, không phải dropdown.
+
+Media playlist (không có biến thể) giờ trả MỘT dòng đọc thẳng từ manifest thay
+vì lùi về backend: backend cũng chỉ trả đúng một lựa chọn cho luồng đó, mà lại
+bắt đợi yt-dlp và đòi app phải đang chạy.
