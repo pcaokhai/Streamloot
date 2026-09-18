@@ -8,4 +8,6 @@ npx esbuild lib/pick.ts --bundle --format=esm --outfile=.tmp-pick.mjs --log-leve
 node tests/pick.test.mjs
 npx esbuild lib/tasks.ts --bundle --format=esm --outfile=.tmp-tasks.mjs --log-level=error
 node tests/tasks.test.mjs
-rm -f .tmp-pick.mjs .tmp-tasks.mjs
+npx esbuild lib/formats.ts --bundle --format=esm --outfile=.tmp-formats.mjs --log-level=error
+node tests/formats.test.mjs
+rm -f .tmp-pick.mjs .tmp-tasks.mjs .tmp-formats.mjs

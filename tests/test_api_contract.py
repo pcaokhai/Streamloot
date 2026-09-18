@@ -107,6 +107,18 @@ class TestApiContract(unittest.TestCase):
             rows = api_main.get_history(source="extension")
         self.assertEqual([r["title"] for r in rows], ["A"])
 
+    def test_format_option_shape_matches_typescript(self):
+        """
+        list_formats dựng dict này bằng tay, không lấy từ bảng DB nào, nên không
+        có migration nào nhắc khi nó đổi. Ghim lại ở đây.
+        """
+        expected = ts_interface_fields("FormatOption")
+        actual = {
+            "format_id", "ext", "resolution", "height",
+            "filesize", "vcodec", "acodec", "recommended",
+        }
+        self.assertEqual(actual, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

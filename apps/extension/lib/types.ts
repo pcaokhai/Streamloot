@@ -28,6 +28,12 @@ export interface FormatOption {
   ext: string;
   resolution: string;
   height: number | null;
+  /** Byte, hoặc `null` khi yt-dlp không biết trước (HLS thường không biết). */
+  filesize: number | null;
+  /** `'none'` nghĩa là luồng này KHÔNG có hình — đó là cách tách âm thanh. */
+  vcodec: string | null;
+  /** `'none'` nghĩa là luồng này không có tiếng. */
+  acodec: string | null;
   recommended: boolean;
 }
 
