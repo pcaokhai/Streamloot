@@ -197,7 +197,13 @@ export function getFormatsByUrl(url: string): Promise<{ title: string; formats: 
  * ADR 0005 §2.3). Chậm hơn nhiều nhưng còn hơn là bó tay.
  */
 export function startDownloadByUrl(url: string, formatId: string | null): Promise<StartResult> {
-  return post<StartResult>('/downloads', { url, ...(formatId ? { format_id: formatId } : {}) });
+  // F1 — thiếu `source` thì backend gán "unknown", History tab lọc theo
+  // 'extension' nên tải qua nút nổi biến mất khỏi History.
+  return post<StartResult>('/downloads', {
+    url,
+    source: 'extension',
+    ...(formatId ? { format_id: formatId } : {}),
+  });
 }
 
 /**

@@ -96,6 +96,19 @@ export function nextPollMs(o: { viewersOpen: boolean; hasActive: boolean }): num
 }
 
 /**
+ * F2 — có nên nhớ (cache) một lần dò định dạng thất bại hay không.
+ *
+ * `status` có giá trị nghĩa là backend đã trả lời (kể cả lỗi) — kết quả bền
+ * theo URL, đáng nhớ. `status` là `undefined` nghĩa là request chưa chạm tới
+ * backend (app chưa chạy, mất kết nối) — nhớ sai này thì trang bị khoá "không
+ * tải được" vĩnh viễn cho tới khi service worker khởi động lại, kể cả sau khi
+ * người dùng đã mở app lên.
+ */
+export function shouldCacheFormatFailure(status: number | undefined): boolean {
+  return status !== undefined;
+}
+
+/**
  * Thời gian tương đối cho một dòng lịch sử (spec §5.2), kiểu "2 phút trước".
  *
  * `created_at` từ SQLite không có múi giờ trong chuỗi — coi là UTC (backend

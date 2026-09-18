@@ -15,7 +15,7 @@ import * as api from '../lib/api';
 import { BackendError } from '../lib/api';
 import { applyIconState, flashCompleted } from '../lib/icon';
 import { cacheTasks } from '../lib/cache';
-import { nextPollMs, pickRingTask } from '../lib/tasks';
+import { nextPollMs, pickRingTask, shouldCacheFormatFailure } from '../lib/tasks';
 import type { Capture, TaskRecord, VideoInfoPayload } from '../lib/types';
 
 const MANIFEST_URL = /\.(m3u8|mpd)(\?|$)/i;
@@ -271,12 +271,18 @@ export default defineBackground(() => {
     const hit = formatCache.get(url);
     if (hit) return hit;
     let result;
+    // F2 — chỉ nhớ THẤT BẠI khi backend thực sự đã trả lời (status có giá
+    // trị). App chưa chạy thì lỗi đó không nói gì về trang, không được phép
+    // khoá trang này vĩnh viễn tới khi worker khởi động lại.
+    let cacheable = true;
     try {
       const r = await api.getFormatsByUrl(url);
       result = { ok: true as const, title: r.title, formats: r.formats };
     } catch (e: unknown) {
       result = { ok: false as const, error: errorText(e) };
+      cacheable = shouldCacheFormatFailure(e instanceof BackendError ? e.status : undefined);
     }
+    if (!cacheable) return result;
     // Trần đơn giản: xoá mục cũ nhất khi đầy. Map giữ thứ tự chèn nên cái đầu
     // tiên là cái cũ nhất.
     if (formatCache.size >= FORMAT_CACHE_MAX) {
@@ -429,7 +435,10 @@ export default defineBackground(() => {
     schedule(tasks ?? lastKnownTasks);
   }
 
-  browser.alarms.onAlarm.addListener((a) => {
+  // F3 — dùng alarms() thay vì browser.alarms trực tiếp: bản đang chạy trước
+  // khi quyền `alarms` được thêm có thể chưa có API này, gọi thẳng ném
+  // TypeError và chặn luôn runTick() khởi động bên dưới.
+  alarms()?.onAlarm.addListener((a) => {
     if (a.name === ALARM) runTick();
   });
 

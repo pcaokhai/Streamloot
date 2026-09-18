@@ -1,4 +1,4 @@
-import { pickRingTask, quantize5, badgeFor, nextPollMs, iconKey, relativeTime, trimHistory, HISTORY_CACHE_MAX, BADGE_ORANGE, BADGE_GRAY }
+import { pickRingTask, quantize5, badgeFor, nextPollMs, iconKey, relativeTime, trimHistory, HISTORY_CACHE_MAX, BADGE_ORANGE, BADGE_GRAY, shouldCacheFormatFailure }
   from '../.tmp-tasks.mjs';
 
 let pass = 0, fail = 0;
@@ -78,6 +78,10 @@ t('không ai xem mà còn task thì 60s', nextPollMs({ viewersOpen: false, hasAc
 t('hết task thì DỪNG hẳn', nextPollMs({ viewersOpen: false, hasActive: false }), null);
 t('không có task thì dừng kể cả khi popup mở',
   nextPollMs({ viewersOpen: true, hasActive: false }), null);
+
+// --- shouldCacheFormatFailure (F2) ---
+t('backend trả lời (có status) thì nhớ lỗi', shouldCacheFormatFailure(404), true);
+t('mất kết nối (không có status) thì KHÔNG nhớ', shouldCacheFormatFailure(undefined), false);
 
 // --- relativeTime (spec §5.2) ---
 const NOW = Date.parse('2026-09-17T10:00:00Z');

@@ -504,6 +504,14 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     // Panel là bề mặt xem thứ hai bên cạnh popup (spec §4.2 hàng 1) — nếu chỉ
     // popup báo viewer thì mở mỗi panel vẫn poll ở nhịp 60s.
     void browser.runtime.sendMessage({ type: 'viewerOpen' }).catch(() => {});
+    // F4 — chỉ gỡ ở onInvalidated (extension reload) là không đủ: điều hướng
+    // SPA hay đóng tab không invalidate context, nên viewers chỉ tăng không
+    // bao giờ giảm. Theo đúng mẫu popup/main.ts: cặp với 'pagehide', bắn ở CẢ
+    // điều hướng thường lẫn khi trang vào bfcache (dù bfcache có bật lại thì
+    // panel cũng mount lại và gửi viewerOpen mới, không lệch vĩnh viễn).
+    window.addEventListener('pagehide', () => {
+      void browser.runtime.sendMessage({ type: 'viewerClosed' }).catch(() => {});
+    });
 
     // Hỏi một lần: site này có plugin riêng không. Quyết định panel đi đường
     // manifest hay đường yt-dlp, nên hỏi ngay chứ không đợi người dùng.
