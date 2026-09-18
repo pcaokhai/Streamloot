@@ -54,23 +54,23 @@ t('không có task thì khoá rỗng', iconKey(undefined), 'idle');
 // --- badgeFor (spec §5.3) ---
 t('BADGE_BLUE đúng mã spec', BADGE_BLUE, '#2563eb');
 t('BADGE_GRAY đúng mã spec', BADGE_GRAY, '#71717a');
-t('hơn 1 download: hiện số, nền xanh',
-  badgeFor([mk('a', 'downloading', 1, '1'), mk('b', 'downloading', 2, '2')], 0),
-  { text: '2', color: BADGE_BLUE, perTab: false });
-t('đúng 1 download: badge TRỐNG vì vòng đã nói rồi',
-  badgeFor([mk('a', 'downloading', 1, '1')], 3), { text: '', color: BADGE_BLUE, perTab: false });
-t('không tải nhưng có stream bắt được: hiện số, nền xám',
-  badgeFor([], 2), { text: '2', color: BADGE_GRAY, perTab: true });
-t('không có gì: trống', badgeFor([], 0), { text: '', color: BADGE_GRAY, perTab: false });
-// --- perTab: số download là toàn cục (D2), số stream là theo tab ---
-t('hơn 1 download => perTab false (toàn cục)',
-  badgeFor([mk('a', 'downloading', 1, '1'), mk('b', 'downloading', 2, '2')], 0).perTab, false);
-t('đúng 1 download => perTab false (toàn cục)',
-  badgeFor([mk('a', 'downloading', 1, '1')], 0).perTab, false);
-t('có capture, không download => perTab true (theo tab)',
-  badgeFor([], 5).perTab, true);
-t('rỗng hoàn toàn => perTab false để xoá badge toàn cục cũ',
-  badgeFor([], 0).perTab, false);
+t('nhiều download: hiện số, nền xanh',
+  badgeFor([mk('a', 'downloading', 1, '1'), mk('b', 'downloading', 2, '2')]),
+  { text: '2', color: BADGE_BLUE });
+t('đúng 1 download: vẫn hiện số 1',
+  badgeFor([mk('a', 'downloading', 1, '1')]),
+  { text: '1', color: BADGE_BLUE });
+t('không tải gì: badge TRỐNG dù tab có stream bắt được',
+  badgeFor([]), { text: '', color: BADGE_BLUE });
+t('task đã kết thúc không được tính',
+  badgeFor([mk('a', 'completed', 100, '1'), mk('b', 'failed', 3, '2')]),
+  { text: '', color: BADGE_BLUE });
+t('paused vẫn tính là đang chạy',
+  badgeFor([mk('a', 'paused', 40, '1')]),
+  { text: '1', color: BADGE_BLUE });
+t('badge không còn khái niệm phạm vi theo tab',
+  'perTab' in badgeFor([mk('a', 'downloading', 1, '1')]), false);
+t('BADGE_BLUE đúng mã spec', BADGE_BLUE, '#2563eb');
 
 // --- nextPollMs (spec §4.2) ---
 t('có người xem thì 1s', nextPollMs({ viewersOpen: true, hasActive: true }), 1000);

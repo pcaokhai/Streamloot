@@ -52,7 +52,7 @@ async function addCapture(tabId: number, cap: Capture): Promise<void> {
 
   // Badge và vòng do applyIconState quyết (lib/tasks.ts), không đặt tay ở đây
   // nữa — hai chỗ cùng đặt badge là hai chỗ sẽ lệch nhau.
-  await applyIconState(lastKnownTasks, next.length, tabId);
+  await applyIconState(lastKnownTasks, tabId);
 
   // Báo content script để panel tự nổi lên.
   browser.tabs.sendMessage(tabId, { type: 'captures', captures: next }).catch(() => {
@@ -227,9 +227,10 @@ export default defineBackground(() => {
     try {
       const { tasks } = await api.getActiveTasks();
       setLastKnownTasks(tasks);
+      // Hỏi tab đang mở chỉ để gỡ badge theo-tab còn sót từ bản cũ; badge bây
+      // giờ luôn toàn cục nên không cần đếm stream bắt được nữa.
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      const caps = tab?.id !== undefined ? await getCaptures(tab.id) : [];
-      await applyIconState(tasks, caps.length, tab?.id);
+      await applyIconState(tasks, tab?.id);
       return tasks;
     } catch {
       // App tắt giữa chừng là chuyện bình thường. Không có dữ liệu mới thì

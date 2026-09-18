@@ -27,43 +27,25 @@ async function baseBitmap(): Promise<ImageBitmap> {
   return createImageBitmap(await res.blob());
 }
 
-export async function applyIconState(
-  tasks: TaskRecord[],
-  tabCaptureCount: number,
-  tabId?: number,
-): Promise<void> {
+export async function applyIconState(tasks: TaskRecord[], tabId?: number): Promise<void> {
   const task = pickRingTask(tasks);
   const key = iconKey(task);
 
-  const badge = badgeFor(tasks, tabCaptureCount);
-  const scoped = badge.perTab && tabId !== undefined;
-  await browser.action
-    .setBadgeText({ text: badge.text, ...(scoped ? { tabId } : {}) })
-    .catch(() => {});
-  await browser.action
-    .setBadgeBackgroundColor({ color: badge.color, ...(scoped ? { tabId } : {}) })
-    .catch(() => {});
-  // Global không tự đè per-tab: nếu badge trước đó thuộc tab này (captures) và
-  // giờ chuyển sang toàn cục (download bắt đầu), badge tab-scoped cũ vẫn còn
-  // treo trên đúng tab đó vì Chrome coi hai scope là hai giá trị độc lập.
-  // `text: null` (không phải '') mới gỡ được override theo-tab để giá trị
-  // toàn cục lộ ra — '' là ĐẶT một badge rỗng theo tab, badge rỗng đó vẫn
-  // thắng badge toàn cục nên số toàn cục sẽ bị che mất, đúng như lỗi cần né.
+  // Badge luôn TOÀN CỤC: nó đếm download, mà download không thuộc tab nào.
+  const badge = badgeFor(tasks);
+  await browser.action.setBadgeText({ text: badge.text }).catch(() => {});
+  await browser.action.setBadgeBackgroundColor({ color: badge.color }).catch(() => {});
+
+  // Gỡ override theo-tab nếu còn sót (bản cũ từng ghi badge theo tab).
   //
-  // Đây là gỡ override trên TAB ĐANG THAO TÁC (active tab hoặc tab vừa bắt
-  // được stream), không phải tìm ra đúng tab nào đang giữ badge theo-tab cũ —
-  // service worker không nhớ chuyện đó và bị thu hồi bất cứ lúc nào nên không
-  // đáng thêm state để theo dõi. Nếu badge cũ nằm ở một tab KHÁC, nó tự lành ở
-  // lần applyIconState kế tiếp cho tab đó (chậm nhất 60s, hoặc 1s khi có bề
-  // mặt đang mở) chứ không lành ngay tại lệnh này.
-  if (!scoped && tabId !== undefined) {
-    // Kiểu `BadgeTextDetails.text` của @wxt-dev/browser (bám theo
-    // chrome.action, không phải browserAction) chỉ khai `string | undefined`
-    // — thiếu `null`, dù đúng chú thích JSDoc ngay trong file .d.ts của gói
-    // này ("If tabId is specified and text is null, the text for the
-    // specified tab is cleared and defaults to the global badge text.") và
-    // hành vi runtime thật của Chrome. Ép kiểu có chủ đích, không phải bừa —
-    // gỡ khi @wxt-dev/browser sửa lại type.
+  // `text: null`, KHÔNG phải '': '' là ĐẶT một badge rỗng cho tab, và badge
+  // theo-tab luôn thắng badge toàn cục — số toàn cục sẽ bị che mất. Chỉ `null`
+  // mới xoá override để giá trị toàn cục lộ ra.
+  if (tabId !== undefined) {
+    // Kiểu `BadgeTextDetails.text` của @wxt-dev/browser chỉ khai
+    // `string | undefined`, thiếu `null`, dù JSDoc ngay trong file .d.ts của
+    // chính gói đó ghi null là cách xoá override, và Chrome thật nhận null.
+    // Ép kiểu có chủ đích — gỡ khi gói sửa type.
     await browser.action.setBadgeText({ text: null as unknown as string, tabId }).catch(() => {});
   }
 

@@ -9,6 +9,8 @@ import type { TaskRecord } from './types';
 import { TERMINAL_STATUSES } from './types';
 
 export const BADGE_BLUE = '#2563eb';
+/** Giữ lại vì lib/icon.ts đối chiếu màu xám của vòng với nó trong chú thích;
+ *  badge không còn dùng màu xám từ khi nó chỉ nói về download. */
 export const BADGE_GRAY = '#71717a';
 
 /** Bước làm tròn phần trăm. 5 => tối đa 20 lần vẽ mỗi download (spec §5.3). */
@@ -61,16 +63,17 @@ export function iconKey(t: TaskRecord | undefined): string {
  * đây là quyết định, không phải chi tiết vẽ, nên nằm ở đây để test được thay
  * vì suy luận từ việc có truyền `tabId` hay không ở lib/icon.ts.
  */
-export function badgeFor(
-  tasks: TaskRecord[],
-  tabCaptureCount: number,
-): { text: string; color: string; perTab: boolean } {
+export function badgeFor(tasks: TaskRecord[]): { text: string; color: string } {
   const live = tasks.filter((t) => !TERMINAL_STATUSES.has(t.status));
-  if (live.length > 1) return { text: String(live.length), color: BADGE_BLUE, perTab: false };
-  if (live.length === 1) return { text: '', color: BADGE_BLUE, perTab: false };
-  if (tabCaptureCount > 0) return { text: String(tabCaptureCount), color: BADGE_GRAY, perTab: true };
-  // Rỗng: perTab false để badge toàn cục cũ (nếu có) được xoá đi.
-  return { text: '', color: BADGE_GRAY, perTab: false };
+  // Badge CHỈ nói về download đang chạy, không nói về stream bắt được.
+  //
+  // Spec §5.3 vốn cho badge hiện số stream bắt được khi không tải gì, nhưng số
+  // đó chạy suốt trên mọi trang có video và làm badge gần như lúc nào cũng
+  // sáng — nhìn vào không biết có đang tải hay không, tức mất đúng thông tin
+  // badge sinh ra để mang. Số stream đã có trong popup, nơi có chỗ giải thích
+  // nó là gì.
+  // Luôn toàn cục: số download không thuộc về tab nào cả.
+  return { text: live.length ? String(live.length) : '', color: BADGE_BLUE };
 }
 
 /**

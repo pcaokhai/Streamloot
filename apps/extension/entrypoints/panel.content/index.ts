@@ -24,16 +24,39 @@ import { pickCapture } from '../../lib/pick';
  * 401. Mọi lời gọi đi qua service worker, nơi có đúng origin
  * `chrome-extension://<id>`.
  */
-const ask = <T,>(msg: unknown): Promise<T> =>
-  // Có hạn giờ: trong MV3, service worker bị giết khi rảnh, và nếu nó chết đúng
-  // lúc đang xử lý thì `sendMessage` không bao giờ resolve — panel đứng im ở
-  // "Đang bắt đầu…" và người dùng không biết là đang chờ hay đã hỏng.
-  Promise.race([
-    browser.runtime.sendMessage(msg) as Promise<T>,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error('Service worker không trả lời (thử tải lại trang)')), 15000),
-    ),
-  ]);
+/**
+ * Content script bị mồ côi sau khi extension được nạp lại.
+ *
+ * Gỡ/cài lại hay bấm Reload trong chrome://extensions sẽ cắt đứt mọi content
+ * script ĐÃ tiêm vào các tab đang mở: `sendMessage` từ đó ném "Extension context
+ * invalidated". Trang phải được tải lại thì bản mới mới vào. Chrome không có
+ * cách nào để script cũ tự hồi sinh.
+ */
+const RELOAD_PAGE_MSG = 'Extension vừa được nạp lại — tải lại trang (⌘R) để dùng tiếp.';
+
+function isOrphaned(err: unknown): boolean {
+  return /Extension context invalidated|message port closed|receiving end does not exist/i.test(
+    err instanceof Error ? err.message : String(err),
+  );
+}
+
+const ask = async <T,>(msg: unknown): Promise<T> => {
+  try {
+    // Có hạn giờ: trong MV3, service worker bị giết khi rảnh, và nếu nó chết
+    // đúng lúc đang xử lý thì `sendMessage` không bao giờ resolve — panel đứng
+    // im ở "Đang bắt đầu…" và người dùng không biết là đang chờ hay đã hỏng.
+    return await Promise.race([
+      browser.runtime.sendMessage(msg) as Promise<T>,
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error('Service worker không trả lời (thử tải lại trang)')), 15000),
+      ),
+    ]);
+  } catch (err) {
+    // Dịch lỗi kỹ thuật sang việc người dùng làm được. "Extension context
+    // invalidated" không nói cho ai biết phải làm gì.
+    throw isOrphaned(err) ? new Error(RELOAD_PAGE_MSG) : err;
+  }
+};
 
 function toPayload(cap: Capture): VideoInfoPayload {
   return {
@@ -290,8 +313,16 @@ export default defineContentScript({
 
     // Service worker có thể đã bắt được manifest TRƯỚC khi content script nạp
     // xong (SPA điều hướng, hoặc trang tải chậm) — hỏi lại một lần lúc khởi động.
-    const existing = (await browser.runtime.sendMessage({ type: 'getCaptures' })) as Capture[];
-    if (existing?.length) surface(existing);
+    // Không để lời gọi này ném ra ngoài: content script mồ côi (extension vừa
+    // nạp lại) sẽ ném ngay tại đây và giết luôn phần khởi tạo còn lại bên dưới,
+    // nên panel không bao giờ xuất hiện để nói cho người dùng biết vì sao.
+    try {
+      const existing = (await browser.runtime.sendMessage({ type: 'getCaptures' })) as Capture[];
+      if (existing?.length) surface(existing);
+    } catch (err) {
+      if (isOrphaned(err)) console.warn('[Streamloot]', RELOAD_PAGE_MSG);
+      else console.warn('[Streamloot] không hỏi được stream đã bắt:', err);
+    }
 
     // Panel là bề mặt xem thứ hai bên cạnh popup (spec §4.2 hàng 1) — nếu chỉ
     // popup báo viewer thì mở mỗi panel vẫn poll ở nhịp 60s.
