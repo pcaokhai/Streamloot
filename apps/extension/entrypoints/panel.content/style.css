@@ -21,19 +21,8 @@
 .sl-x { cursor: pointer; opacity: .55; background: none; border: 0; color: inherit; font-size: 15px; padding: 0 2px; }
 .sl-x:hover { opacity: 1; }
 .sl-sub { font-size: 11px; opacity: .55; margin-bottom: 10px; word-break: break-all; }
-.sl-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
-.sl-row select { flex: 1; min-width: 0; font: inherit; padding: 4px; border-radius: 6px; }
-.sl-btn {
-  font: inherit; font-weight: 600; cursor: pointer;
-  padding: 5px 12px; border-radius: 7px; border: 0;
-  background: #2563eb; color: #fff;
-}
-.sl-btn:disabled { opacity: .5; cursor: default; }
 .sl-msg { margin-top: 8px; font-size: 12px; opacity: .8; }
 .sl-err { color: #ff9f9f; }
-.sl-bar { height: 4px; border-radius: 2px; background: #3a3a3c; margin-top: 8px; overflow: hidden; }
-/* cam = tiến trình (khớp vòng quanh icon); xanh giữ cho nút hành động */
-.sl-bar > i { display: block; height: 100%; background: #f97316; width: 0; transition: width .2s; }
 
 .sl-list { max-height: 320px; overflow-y: auto; margin: 6px 0; }
 .sl-group {
@@ -44,6 +33,8 @@
   padding: 7px 8px; border-radius: 6px; cursor: pointer;
 }
 .sl-row-item:hover { background: rgba(249, 115, 22, .16); }
+/* Đang gửi lệnh tải: khoá dòng lại để bấm dồn không sinh hai lần tải. */
+.sl-row-item.sl-pending { opacity: .5; cursor: default; pointer-events: none; }
 .sl-row-label { font-weight: 600; }
 .sl-row-detail { font-size: 11px; opacity: .7; white-space: nowrap; }
 /* Dòng yt-dlp tự chọn: đánh dấu nhẹ, không cướp sự chú ý khỏi các dòng khác. */

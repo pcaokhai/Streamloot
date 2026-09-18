@@ -12,4 +12,6 @@ npx esbuild lib/formats.ts --bundle --format=esm --outfile=.tmp-formats.mjs --lo
 node tests/formats.test.mjs
 npx esbuild lib/anchor.ts --bundle --format=esm --outfile=.tmp-anchor.mjs --log-level=error
 node tests/anchor.test.mjs
-rm -f .tmp-pick.mjs .tmp-tasks.mjs .tmp-formats.mjs .tmp-anchor.mjs
+npx esbuild lib/submitGuard.ts --bundle --format=esm --outfile=.tmp-submitGuard.mjs --log-level=error
+node tests/submitGuard.test.mjs
+rm -f .tmp-pick.mjs .tmp-tasks.mjs .tmp-formats.mjs .tmp-anchor.mjs .tmp-submitGuard.mjs

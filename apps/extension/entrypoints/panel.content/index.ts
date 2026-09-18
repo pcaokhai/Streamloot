@@ -18,6 +18,7 @@ import { pickCapture } from '../../lib/pick';
 import { pickAnchor, buttonPos, BTN_SIZE, BTN_PAD } from '../../lib/anchor';
 import { groupFormats } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
+import { canSubmit } from '../../lib/submitGuard';
 
 /**
  * Panel KHÔNG gọi HTTP trực tiếp.
@@ -343,6 +344,16 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         msg.className = isError ? 'sl-msg sl-err' : 'sl-msg';
       };
 
+      // Có một lệnh tải đang bay không. Bấm dồn trong lúc `await ask(...)` chưa
+      // trả lời sẽ sinh hai download trùng file — canSubmit là quyết định
+      // (testable), disable từng dòng là phần vẽ (không testable, ADR 0006).
+      let pending = false;
+      const rowEls: HTMLElement[] = [];
+      const setPending = (v: boolean) => {
+        pending = v;
+        for (const el of rowEls) el.classList.toggle('sl-pending', v);
+      };
+
       /** Một dòng bấm được. Bấm là tải luôn — không có bước xác nhận (§5.1). */
       function addRow(row: FormatRow): void {
         const el = document.createElement('div');
@@ -354,7 +365,11 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         right.className = 'sl-row-detail';
         right.textContent = row.detail;
         el.append(left, right);
-        el.onclick = () => void startDownload(row.formatId);
+        el.onclick = () => {
+          if (!canSubmit(pending)) return; // đang bay — bấm thêm không làm gì
+          void startDownload(row.formatId);
+        };
+        rowEls.push(el);
         list.append(el);
       }
 
@@ -375,6 +390,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
        * icon. Để panel ở lại là chắn mất video người dùng đang xem.
        */
       async function startDownload(formatId: string): Promise<void> {
+        setPending(true);
         say('Đang bắt đầu…');
         let r: { ok: boolean; error?: string };
         try {
@@ -385,12 +401,14 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
           );
         } catch (err) {
           say(err instanceof Error ? err.message : String(err), true);
+          setPending(false); // panel ở lại — phải bấm lại được
           return;
         }
         if (!r.ok) {
           // Lỗi thì GIỮ panel mở: đóng lại là người dùng mất cả thông báo lẫn
           // danh sách vừa chọn.
           say(r.error ?? 'Tải thất bại', true);
+          setPending(false);
           return;
         }
         mounted = false;
