@@ -1,4 +1,4 @@
-import { pickAnchor, buttonPos, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX } from '../.tmp-anchor.mjs';
+import { pickAnchor, buttonPos, panelPos, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX, PANEL_W, PANEL_GAP } from '../.tmp-anchor.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -37,14 +37,31 @@ t('tất cả đều ngoài khung nhìn thì vẫn chọn cái lớn nhất, kh�
   () => pickAnchor([v(320, 240, false, -2000, 0), v(1280, 720, false, -3000, 0)], VIEW), 1);
 
 // --- vị trí nút: góc trên PHẢI, nằm trong video ---
-t('nút ở góc trên phải, thụt vào trong',
+t('nút nằm ngay trên góc phải video, ngoài khung',
   () => buttonPos({ top: 100, left: 200, width: 640, height: 360 }, BTN_SIZE, BTN_PAD),
-  { top: 108, left: 200 + 640 - BTN_SIZE - BTN_PAD });
-t('video sát mép trái vẫn tính đúng',
+  { top: 100 - BTN_SIZE - BTN_PAD, left: 200 + 640 - BTN_SIZE - BTN_PAD });
+t('video sát mép trên+trái: nút kẹp xuống pad, không bay khỏi màn hình',
   () => buttonPos({ top: 0, left: 0, width: 300, height: 200 }, BTN_SIZE, BTN_PAD),
   { top: 8, left: 300 - BTN_SIZE - BTN_PAD });
 
 t('hằng số có giá trị dùng được', () => [BTN_SIZE > 0, BTN_PAD >= 0, MIN_VIDEO_PX > 0], [true, true, true]);
+
+const PV = { width: 1200, height: 800 };
+t('panel thả ngay dưới nút, mép phải thẳng hàng với nút',
+  () => panelPos({ top: 100, left: 700 }, BTN_SIZE, BTN_PAD, PV),
+  { top: 100 + BTN_SIZE + PANEL_GAP, left: 700 + BTN_SIZE - PANEL_W });
+
+t('nút sát mép trái: panel không tràn ra ngoài trái',
+  () => panelPos({ top: 100, left: 40 }, BTN_SIZE, BTN_PAD, PV).left,
+  BTN_PAD);
+
+t('nút sát đáy: panel được kéo lên để còn lộ ra',
+  () => panelPos({ top: 790, left: 700 }, BTN_SIZE, BTN_PAD, PV).top < 790,
+  true);
+
+t('nút sát mép phải: panel không tràn ra ngoài phải',
+  () => panelPos({ top: 100, left: 1190 }, BTN_SIZE, BTN_PAD, PV).left + PANEL_W <= PV.width,
+  true);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

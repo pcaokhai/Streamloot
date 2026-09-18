@@ -1,11 +1,11 @@
 /* Chạy trong shadow root nên không rò ra trang, nhưng vẫn tự đặt mọi thuộc tính
    thay vì thừa kế: trang chủ có thể set font-size/color lạ trên :root. */
 .sl-panel {
+  /* top/left đặt bằng JS theo vị trí nút nổi (lib/anchor panelPos) — không ghim
+     cứng vào góc cửa sổ, kẻo panel mở ở xa chỗ người dùng vừa bấm. */
   position: fixed;
-  top: 16px;
-  right: 16px;
   z-index: 2147483647;
-  width: 320px;
+  width: 320px; /* khớp PANEL_W trong lib/anchor.ts */
   max-height: 70vh;
   overflow: auto;
   box-sizing: border-box;

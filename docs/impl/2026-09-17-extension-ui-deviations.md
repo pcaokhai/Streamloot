@@ -78,3 +78,17 @@ site không có plugin riêng. Đã kiểm bằng máy: `tsc`, build, test backe
   vô hạn — cần thêm hạn giờ và thông báo rõ.
 - Site có plugin riêng: hành vi phải KHÔNG đổi (vẫn đi đường manifest).
 - Bộ nhớ đệm: mở lại cùng trang không được gọi `yt-dlp` lần hai.
+
+## 8. Nút nổi nằm NGOÀI khung video, panel bám theo nút
+
+Spec §5.1 vẽ nút ở góc trên phải *bên trong* video. Thử tay (2026-09-18) cho
+thấy hai vấn đề: nút đè lên hình và lên nút điều khiển của player; còn panel
+thì CSS ghim cứng `top:16px; right:16px` nên mở ở đâu cũng nhảy lên góc cửa
+sổ, xa chỗ vừa bấm.
+
+Chốt theo mẫu Cốc Cốc (mirror sang phải): nút nằm **ngay trên mép video**,
+thẳng hàng góc phải (`buttonPos`: `top = rect.top - size - pad`, kẹp xuống
+`pad` khi video sát mép trên). Panel thả **ngay dưới nút**, mép phải thẳng
+hàng, kẹp trong khung nhìn (`panelPos` trong `lib/anchor.ts`, có test); được
+đặt lại mỗi lần `place()` chạy nên bám theo khi cuộn. Không lật panel lên
+trên khi thiếu chỗ — chỉ kẹp để còn lộ 200px, phần dư panel tự cuộn.

@@ -67,10 +67,49 @@ export function pickAnchor(videos: VideoLike[], viewport: { width: number; heigh
   return from.reduce((best, i) => (area(videos[i].rect) > area(videos[best].rect) ? i : best), from[0]);
 }
 
-/** Toạ độ nút: góc trên PHẢI của video, thụt vào trong để không tràn ra ngoài. */
+/**
+ * Toạ độ nút: NGAY TRÊN mép video, thẳng hàng góc phải — như thanh nút của
+ * Cốc Cốc nằm trên góc trái video, mirror sang phải. Nằm ngoài khung để không
+ * che hình và không đè lên nút điều khiển của chính player.
+ *
+ * Video sát mép trên khung nhìn thì không còn chỗ phía trên: kẹp xuống `pad`,
+ * chấp nhận đè lên mép video một chút còn hơn là nút bay ra ngoài màn hình.
+ */
 export function buttonPos(rect: Rect, size: number, pad: number): { top: number; left: number } {
   return {
-    top: rect.top + pad,
+    top: Math.max(rect.top - size - pad, pad),
     left: rect.left + rect.width - size - pad,
+  };
+}
+
+/** Bề rộng panel, px — phải khớp `.sl-panel { width }` trong style.css. */
+export const PANEL_W = 320;
+/** Khe giữa nút và panel, px. */
+export const PANEL_GAP = 6;
+/** Phần panel tối thiểu phải lộ ra trong khung nhìn, px. */
+const PANEL_MIN_VISIBLE = 200;
+
+/**
+ * Toạ độ panel: thả NGAY DƯỚI nút, mép phải thẳng hàng với nút — cách IDM và
+ * Cốc Cốc làm, để panel mở ra đúng chỗ người dùng vừa bấm chứ không nhảy lên
+ * góc cửa sổ (spec §5.1: "chiếm chỗ càng ít càng tốt").
+ *
+ * Kẹp vào khung nhìn: nút neo ở mép phải video, nên panel rộng 320px dễ tràn
+ * trái khi video hẹp; nút ở gần đáy thì panel tràn xuống dưới.
+ *
+ * ponytail: không lật panel lên trên nút khi thiếu chỗ — chỉ kẹp để còn lộ ít
+ * nhất PANEL_MIN_VISIBLE px, phần còn lại panel tự cuộn (max-height 70vh).
+ * Lật lên cần biết chiều cao thật của panel, mà cái đó phụ thuộc nội dung.
+ */
+export function panelPos(
+  btn: { top: number; left: number },
+  btnSize: number,
+  pad: number,
+  view: { width: number; height: number },
+): { top: number; left: number } {
+  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+  return {
+    top: clamp(btn.top + btnSize + PANEL_GAP, pad, view.height - pad - PANEL_MIN_VISIBLE),
+    left: clamp(btn.left + btnSize - PANEL_W, pad, view.width - pad - PANEL_W),
   };
 }

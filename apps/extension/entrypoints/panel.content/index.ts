@@ -15,7 +15,7 @@
 import './style.css';
 import type { Capture, FormatOption, VideoInfoPayload } from '../../lib/types';
 import { pickCapture } from '../../lib/pick';
-import { pickAnchor, buttonPos, BTN_SIZE, BTN_PAD } from '../../lib/anchor';
+import { pickAnchor, buttonPos, panelPos, BTN_SIZE, BTN_PAD } from '../../lib/anchor';
 import { groupFormats } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
@@ -156,18 +156,31 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       }));
       const i = pickAnchor(shaped, { width: window.innerWidth, height: window.innerHeight });
 
+      let pos: { top: number; left: number };
       if (i < 0) {
         // Không tìm thấy video nào dùng được: lùi về góc trên phải CỬA SỔ, không
         // biến mất — spec §5.1.1 yêu cầu nút vẫn phải bấm được.
         anchored = null;
-        fab.style.top = `${BTN_PAD}px`;
-        fab.style.left = `${window.innerWidth - BTN_SIZE - BTN_PAD}px`;
-        return;
+        pos = { top: BTN_PAD, left: window.innerWidth - BTN_SIZE - BTN_PAD };
+      } else {
+        anchored = vids[i];
+        pos = buttonPos(shaped[i].rect, BTN_SIZE, BTN_PAD);
       }
-      anchored = vids[i];
-      const pos = buttonPos(shaped[i].rect, BTN_SIZE, BTN_PAD);
       fab.style.top = `${pos.top}px`;
       fab.style.left = `${pos.left}px`;
+      placePanel(pos);
+    }
+
+    /**
+     * Panel bám theo nút: gọi mỗi lần nút đổi chỗ (cuộn, đổi cỡ) và lúc mở.
+     * Panel đang ẩn thì vẫn đặt — để lần mở kế tiếp không hiện ra ở chỗ cũ.
+     */
+    function placePanel(btn: { top: number; left: number }): void {
+      const root = ui.shadow.querySelector('.sl-panel');
+      if (!(root instanceof HTMLElement)) return;
+      const p = panelPos(btn, BTN_SIZE, BTN_PAD, { width: window.innerWidth, height: window.innerHeight });
+      root.style.top = `${p.top}px`;
+      root.style.left = `${p.left}px`;
     }
 
     // Theo dõi bằng observer, KHÔNG bằng setInterval: đổi kích thước, cuộn,
@@ -478,6 +491,9 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // ui.mount() đã chạy ngay từ đầu (để nút hiện ra) — bấm nút chỉ còn việc
       // mở panel ra và vẽ nội dung, không cần mount lại.
       mounted = true;
+      // Đặt panel theo vị trí HIỆN TẠI của nút trước khi hiện — nút có thể đã
+      // dời chỗ từ lần placePanel gần nhất mà panel lúc đó chưa được mount.
+      placePanel({ top: parseFloat(fab.style.top) || 0, left: parseFloat(fab.style.left) || 0 });
       root.style.display = '';
       render(root);
     };
