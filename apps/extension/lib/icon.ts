@@ -12,7 +12,23 @@ import { badgeFor, iconKey, pickRingTask, quantize5 } from './tasks';
 import type { TaskRecord } from './types';
 
 const SIZE = 32;
-const RING_W = 4;
+/**
+ * Vòng dày 6px trên canvas 32px.
+ *
+ * 4px bị chìm: trên thanh công cụ icon hiển thị cỡ 16pt, nên mọi thứ co lại một
+ * nửa và một vòng 4px thành 2pt — mảnh hơn nét của chính glyph bên trong. Dày
+ * hơn thì icon nền phải nhỏ lại, và đó là đánh đổi đúng: lúc đang tải thì tiến
+ * trình mới là thứ cần đọc, còn "đây là extension nào" thì vị trí trên thanh
+ * công cụ đã trả lời rồi.
+ */
+const RING_W = 6;
+/**
+ * Icon nền mờ đi khi đang tải, để vòng là thứ đập vào mắt trước.
+ *
+ * Không đổi hẳn màu glyph: icon phải còn nhận ra được là Streamloot. Giảm độ
+ * đục thì nó lùi về sau mà vẫn giữ hình dạng.
+ */
+const BASE_ALPHA_WHILE_BUSY = 0.45;
 const RING_BLUE = '#2563eb';
 // Khác BADGE_GRAY (#71717a) một cách cố ý, không phải lệch nhầm: vòng xám này
 // khớp màu xám tạm-dừng/chờ trong popup, còn BADGE_GRAY là màu rảnh của badge
@@ -64,8 +80,14 @@ export async function applyIconState(tasks: TaskRecord[], tabId?: number): Promi
       // Rảnh: icon trần, vòng biến mất hẳn (spec §5.3).
       ctx.drawImage(bmp, 0, 0, SIZE, SIZE);
     } else {
-      const inset = RING_W + 1;
+      // inset 9 chứ không phải 8: icon là hình VUÔNG, nên bốn góc cách tâm xa
+      // hơn cạnh. Tính ra với vòng dày 6 thì mép trong dải vòng ở bán kính 10,
+      // còn góc icon 16px nằm ở 11.3 — tức chọc vào vòng. Ở 14px thì góc ở 9.9,
+      // vừa đủ nằm trong.
+      const inset = RING_W + 3;
+      ctx.globalAlpha = BASE_ALPHA_WHILE_BUSY;
       ctx.drawImage(bmp, inset, inset, SIZE - inset * 2, SIZE - inset * 2);
+      ctx.globalAlpha = 1;
       const pct = quantize5(task.progress);
       const r = SIZE / 2 - RING_W / 2;
       const TOP = -Math.PI / 2; // 12 giờ, như mọi vòng tiến trình khác
