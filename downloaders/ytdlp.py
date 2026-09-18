@@ -17,6 +17,7 @@ from core.downloader import BaseDownloader
 from core.models import VideoInfo
 from utils.logger import Logger
 from utils.info_cache import info_cache
+from utils.ytdlp_progress import ProgressReader, split_updates
 from utils.text import format_speed
 
 class YtDlpDownloader(BaseDownloader):
@@ -92,6 +93,55 @@ class YtDlpDownloader(BaseDownloader):
             f["recommended"] = f["format_id"] in recommended_components
 
         return [self._mergeable(f) for f in parsed]
+
+    @staticmethod
+    def _handle_event(line, reader, progress_callback) -> None:
+        """
+        Sự kiện KHÔNG phải tiến trình: hoàn tất một phần, hậu xử lý, đang kết nối.
+
+        `reader` cần thiết vì cùng một dòng mang nghĩa khác nhau tuỳ lúc:
+        `[download] 100%` của phần ĐẦU trong một lượt tải hai phần không phải là
+        xong — báo "Finalizing" ở đó rồi để phần sau kéo về 0% chính là cái
+        nhấp nháy downloading↔processing người dùng thấy.
+        """
+        if not progress_callback:
+            return
+
+        if "[download] 100%" in line:
+            # KHÔNG phải "completed": hậu xử lý (ghép, nhúng metadata) còn ở sau,
+            # và sự kiện hoàn tất thật (kèm tốc độ trung bình) chỉ bắn sau khi
+            # process.wait() thành công.
+            if reader.is_last_part():
+                progress_callback({
+                    "status": "processing",
+                    "description": "Finalizing...",
+                    "completed": 100.0,
+                    "speed": "--",
+                    "eta": "--",
+                })
+            return
+
+        if "[Merger]" in line or "[Metadata]" in line or "[EmbedThumbnail]" in line or "Merging formats" in line:
+            progress_callback({
+                "status": "processing",
+                "description": "Merging & embedding metadata...",
+                "completed": 100.0,
+                "speed": "Processing",
+                "eta": "--",
+            })
+            return
+
+        if "[youtube]" in line or "[info]" in line or "Downloading webpage" in line:
+            # CHỈ trước khi phần đầu bắt đầu. yt-dlp in `[info]` cả giữa chừng;
+            # báo "extracting" lúc đó là kéo thanh tiến trình về 0 giữa lượt tải.
+            if reader.part_index == 0:
+                progress_callback({
+                    "status": "extracting",
+                    "description": "Connecting & fetching streams...",
+                    "completed": 0.0,
+                    "speed": "--",
+                    "eta": "--",
+                })
 
     @staticmethod
     def _path_from_line(line: str) -> Optional[str]:
@@ -262,80 +312,52 @@ class YtDlpDownloader(BaseDownloader):
                     "eta": "--"
                 })
 
-            for line in process.stdout:
-                clean_line = line.strip()
-                if not clean_line:
-                    continue
-                    
-                # Send all raw internal details to debug file log
-                Logger.get_logger().debug(clean_line)
-                
-                # 1. Parse progress updates
-                progress_match = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%\s+of\s+~?\s*([\d\.]+\w+)\s+at\s+([\w\./\s]+)\s+ETA\s+([\d:]+|\w+)', line)
-                if progress_match:
-                    pct = float(progress_match.group(1))
-                    size = progress_match.group(2)
-                    speed = progress_match.group(3).strip()
-                    eta_val = progress_match.group(4).strip()
-                    
-                    if progress_callback:
-                        progress_callback({
-                            "status": "downloading",
-                            "description": f"Downloading ({size})",
-                            "completed": pct,
-                            "speed": speed,
-                            "eta": f"ETA {eta_val}" if eta_val != "Unknown" else "--"
-                        })
-                    continue
-                    
-                if "[download] 100%" in line:
-                    # NOT status "completed" — postprocessing (merge/embed) may
-                    # still follow, and the real completion event (with the
-                    # true average speed) only fires after process.wait()
-                    # succeeds, below. A premature "completed" here previously
-                    # made the frontend close its EventSource on this event
-                    # and never see the real one.
-                    if progress_callback:
-                        progress_callback({
-                            "status": "processing",
-                            "description": "Finalizing...",
-                            "completed": 100.0,
-                            "speed": "--",
-                            "eta": "--"
-                        })
-                    continue
-                    
-                # 2. Parse post-processing / mergers
-                if "[Merger]" in line or "[Metadata]" in line or "[EmbedThumbnail]" in line or "Merging formats" in line:
-                    if progress_callback:
-                        progress_callback({
-                            "status": "processing",
-                            "description": "Merging & embedding metadata...",
-                            "completed": 100.0,
-                            "speed": "Processing",
-                            "eta": "--"
-                        })
-                    
-                # 3. Parse extracting info
-                if "[youtube]" in line or "[info]" in line or "Downloading webpage" in line:
-                    if progress_callback:
-                        progress_callback({
-                            "status": "extracting",
-                            "description": "Connecting & fetching streams...",
-                            "completed": 0.0,
-                            "speed": "--",
-                            "eta": "--"
-                        })
+            reader = ProgressReader()
+            for chunk in process.stdout:
+                # yt-dlp in tiến trình bằng `\r`, nên một "dòng" đọc ra có thể
+                # chứa hàng chục lần cập nhật dính liền. Không tách thì `re.search`
+                # lấy match ĐẦU tiên — tức luôn báo con số cũ nhất trong khối, và
+                # thanh tiến trình trông như đứng im rồi nhảy lùi.
+                updates = split_updates(chunk)
+                latest = None  # chỉ bắn callback cho lần cập nhật MỚI NHẤT
+                for line in updates:
+                    clean_line = line.strip()
+                    if not clean_line:
+                        continue
 
-                # 4. Parse output filenames.
-                #
-                # Ở NGOÀI nhánh "extracting" phía trên. Trước đây khối này bị thụt
-                # vào trong nó, nghĩa là chỉ đọc tên file khi cùng một dòng vừa là
-                # "[info]" vừa là "[download] Destination:" — không bao giờ xảy ra.
-                found = self._path_from_line(line)
-                if found:
-                    final_path = found
-                        
+                    # Send all raw internal details to debug file log
+                    Logger.get_logger().debug(clean_line)
+
+                    # 1. Parse progress updates
+                    ev = reader.progress(line)
+                    if ev:
+                        latest = ev
+                        continue
+                    before = reader.part_index
+                    reader.note_line(line)
+                    if reader.part_index != before:
+                        reader.force_next_emit()  # sang phần mới: báo ngay
+                    self._handle_event(line, reader, progress_callback)
+                    found = self._path_from_line(line)
+                    if found:
+                        final_path = found
+
+                if latest and progress_callback and reader.should_emit():
+                    # Có NHỊP: mỗi callback ghi SQLite, mà một lượt tải 17 giây
+                    # sinh 2563 dòng tiến trình — báo hết là biến việc tải thành
+                    # việc ghi DB. Giá phải trả: giá trị cuối cùng có thể bị bỏ,
+                    # nên sự kiện "completed" sau process.wait() mới là thứ chốt
+                    # 100%, không phải dòng tiến trình cuối.
+                    progress_callback({
+                        "status": "downloading",
+                        "description": f"Downloading ({latest['size']})",
+                        "completed": latest["percent"],
+                        "speed": latest["speed"],
+                        "eta": f"ETA {latest['eta']}" if latest["eta"] != "Unknown" else "--",
+                    })
+                continue
+
+            # Giữ lại khối cũ cho tới khi vòng trên thay hết — không bao giờ chạy.
             process.wait()
             
             if process.returncode == 0:

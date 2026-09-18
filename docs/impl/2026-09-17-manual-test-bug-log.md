@@ -435,3 +435,52 @@ tưởng đã xong. Thứ chốt được vụ này là **đọc DB của app**,
 **Ghi chú phụ phát hiện trong lúc gỡ.** Bộ test đang ghi fixture (`Sample`,
 `example.com`) vào `db/history.db` **thật** của repo. Không ảnh hưởng app (app
 dùng DB trong Application Support) nhưng vẫn là test làm bẩn dữ liệu — nên tách.
+
+## Bug 20. Trạng thái nhấp nháy downloading↔processing, và app chậm hơn
+
+**Triệu chứng.** Sau khi thêm cache extract, app "loop nhiều lần giữa downloading
+và extracting, chậm hơn".
+
+**Chẩn đoán đầu tiên của tôi — nghi cache — SAI.** Đo bằng cách chạy yt-dlp thật
+và đếm tiền tố dòng: `--load-info-json` cho ra 1 `[info]`, 4 `[hlsnative]`,
+1 `[Merger]`. Không có gì gây vòng lặp.
+
+**Nguyên nhân thật: hệ quả của bản sửa Bug 18**, không phải của cache.
+
+Từ khi ghép tiếng vào hình (`<id>+bestaudio`), một lượt tải gồm **hai phần**:
+tải hình xong rồi tải tiếng, mỗi phần chạy 0→100% riêng. Bản đọc tiến trình cũ
+không biết điều đó:
+
+1. `[download] 100%` của phần ĐẦU bắn `processing/"Finalizing"`, rồi phần hai
+   bắt đầu lại từ 0% → `downloading`. Đó chính là cái nhấp nháy.
+2. `[info]` giữa chừng bắn `extracting/0%`, kéo thanh tiến trình về 0.
+3. Phần trăm reset giữa hai phần.
+
+**Nguyên nhân của "chậm hơn" — đo được.** Một lượt tải 17 giây sinh **2563** lần
+gọi `progress_callback`, mà mỗi lần là một lần **ghi SQLite**. Việc tải biến
+thành việc ghi DB.
+
+Kèm theo: yt-dlp tính phần trăm theo **tổng ước lượng**, mà ước lượng đổi liên
+tục khi tải HLS theo mảnh — nên con số thật sự có lúc nhỏ đi (0.3 → 0.2), đọc ra
+là "đang chạy ngược".
+
+**Sửa** (`utils/ytdlp_progress.py`, tách riêng để test được):
+- Tách khối stdout theo `\r` (yt-dlp in tiến trình bằng `\r`, không phải `\n`;
+  lấy match đầu tiên trong khối là luôn báo con số cũ nhất).
+- `overall_percent()` quy phần trăm của từng phần về **một thang chung**, nên
+  thanh tiến trình không reset giữa hai phần.
+- Chặn tụt lùi bằng `max()` tích luỹ.
+- `[download] 100%` chỉ báo "Finalizing" khi đã ở **phần cuối**.
+- `[info]` chỉ báo "extracting" khi **chưa** bắt đầu tải phần nào.
+- Nhịp báo tối thiểu 0.4s, và báo ngay khi sang phần mới.
+
+**Đo lại cùng một video:** callback **2563 → 36**, không còn tụt lùi, chuỗi
+trạng thái sạch `preparing → extracting → downloading → processing → completed`.
+
+**Đánh đổi.** Có nhịp báo nghĩa là giá trị tiến trình CUỐI CÙNG có thể bị bỏ.
+Chấp nhận được vì sự kiện `completed` sau `process.wait()` mới là thứ chốt 100%
+— không phụ thuộc dòng tiến trình cuối.
+
+**Bài học.** "Chậm hơn" là triệu chứng, không phải nguyên nhân. Nghi phạm đầu
+tiên (cache vừa thêm) là nghi phạm **sai**; thứ chỉ đúng chỗ là đếm dòng output
+thật và đếm số lần ghi DB.
