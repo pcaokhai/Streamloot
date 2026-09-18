@@ -383,3 +383,78 @@ chứ không như "lỗi".
 - **`place()` chưa throttle bằng rAF** — mỗi tick scroll/mutation đều
   `querySelectorAll` + `getBoundingClientRect` đồng bộ.
 - **`.app` chưa ký và chưa notarize.**
+
+---
+
+## 8. Sửa độ chậm: bỏ lần extract thứ hai (19/09)
+
+### Chẩn đoán ban đầu SAI, phải sửa lại
+
+Trước đó tôi ghi "đường byUrl chạy yt-dlp **ba lần**: liệt kê, `/downloads`
+extract lại, rồi yt-dlp tải lại extract lần nữa". Đọc kỹ code thì **sai**:
+`YtDlpDefaultExtractor.extract()` **không chạm mạng** — nó chỉ bọc URL vào một
+`VideoInfo`. Nên lần "extract" ở `/downloads` là miễn phí.
+
+Thực tế chỉ có **hai** lần tốn tiền, và cả hai đều là `yt-dlp` tự extract:
+
+| Bước | Lệnh | Đo được |
+|---|---|---|
+| Liệt kê format | `yt-dlp -J <page_url>` | 1.44s (site tin tức) / 3.01s (YouTube) |
+| Tải | `yt-dlp <page_url>` | extract lại y hệt trước khi kéo byte |
+
+Bài học: con số đầu tiên tôi đưa ra ("~4 giây, ba lần") **quá tay**. Đúng là
+1.4–3.0s bị lặp đúng một lần. Sửa lại con số trước khi thiết kế theo nó.
+
+### Cách sửa và vì sao chọn nó
+
+`yt-dlp --load-info-json` nhận lại kết quả `-J` và **bỏ qua hẳn** bước extract.
+Đo trực tiếp: **0.30s** thay vì 1.44s, và `grep -c "Downloading webpage"` trong
+log `-v` cho **0** — không có request extract nào.
+
+Các lựa chọn đã cân nhắc:
+
+| Hướng | Vì sao loại |
+|---|---|
+| Nhớ `VideoInfo` sau `extract()` | Không giải quyết gì: `extract()` vốn miễn phí |
+| Để client giữ info rồi gửi lại khi tải | 665KB cho YouTube đi qua message port mỗi lượt |
+| Giữ một tiến trình yt-dlp sống | Phức tạp hơn nhiều, và phải quản lý vòng đời |
+| **Nhớ `-J` ở backend, dùng `--load-info-json`** | **Chọn** — dùng đúng cơ chế yt-dlp đã có |
+
+### Quyết định quan trọng nhất: cache DÙNG MỘT LẦN
+
+Info JSON chứa URL **có chữ ký và hết hạn**. Nếu một mục cũ làm lượt tải hỏng
+thì người dùng mất cả lượt tải — đắt hơn nhiều so với 1.4s tiết kiệm được.
+
+Cách chống thông thường là thử lại trong vòng chạy tải: nếu yt-dlp hỏng vì info
+cũ thì chạy lại không dùng cache. Nhưng `download()` dài 243 dòng với một vòng
+đọc output — bọc nó lại để thử lại là rủi ro lớn hơn lợi ích.
+
+**Chọn cách rẻ hơn:** `take()` vừa lấy vừa **xoá**. Lượt tải đầu sau khi liệt kê
+được đi đường nhanh; nếu nó hỏng, lần thử lại **không còn mục nào** nên tự đi
+đường extract bình thường. Tự lành, không phải đụng vào vòng chạy.
+
+TTL 300s và tối đa 4 mục (info YouTube ~650KB). Khoá `threading.Lock` vì endpoint
+chạy ở threadpool còn lượt tải chạy ở background task — hai luồng chạm cùng dict.
+Có test bắn 20 luồng cùng `take()` một mục và khẳng định **đúng một** luồng nhận.
+
+### Hai lỗi gặp khi làm
+
+**Import vòng.** Đặt cache ở `services/` thì `downloaders.ytdlp` → `services`
+→ `services/__init__` → `download_service` → `downloaders.ytdlp`. Chuyển sang
+`utils/` (nơi nó thuộc về: không phụ thuộc service nào).
+
+**`import tempfile` cục bộ che mất import cấp module.** Trong `download()` có
+một `import tempfile` nằm giữa hàm (khối xử lý file nguỵ trang PNG). Python thấy
+vậy là coi `tempfile` là **biến địa phương của cả hàm**, nên lời gọi ở phía trên
+ném `UnboundLocalError`. Gỡ import thừa.
+
+### Kiểm chứng
+
+Test đầu tiên tôi viết chỉ khẳng định "cache có dữ liệu" — **vô dụng**: cache
+đầy mà `download()` không đọc thì vẫn chậm y như cũ. Viết lại để bắt **đúng dòng
+lệnh** gửi cho yt-dlp: phải có `--load-info-json` và **không** có URL (truyền cả
+hai là bảo yt-dlp extract lại, mất sạch cái lợi). Kiểm ngược: bỏ qua cache →
+test đỏ.
+
+Đo đầu-cuối trên link thật: tải xong, file có đủ `h264` + `aac`, cache rỗng sau
+khi dùng, không sót file tạm.
