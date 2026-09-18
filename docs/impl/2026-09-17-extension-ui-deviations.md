@@ -8,11 +8,10 @@ Written vì `CLAUDE.md` coi `docs/` là nguồn sự thật, và bảng coverage
 - **Đã làm**: `lastKnownTasks` trong `background.ts` chỉ là biến in-memory phục vụ vẽ icon, không phải cache cho popup đọc. Popup gọi thẳng backend mỗi lần mở, không có gì để hiện nếu request chậm hoặc lỗi — hiện thông báo lỗi thay vì danh sách cũ.
 - **Vì sao gác lại**: đây là cải thiện độ trễ cảm nhận (perceived latency), không phải đúng/sai chức năng. Nhánh này đã dài, làm thêm cache có state đồng bộ hai chiều là việc riêng.
 
-## 2. §5.3 "vòng chạy tới 100% rồi mới ẩn" — chưa làm
+## 2. §5.3 "vòng chạy tới 100% rồi mới ẩn" — ĐÃ LÀM
 
-- **Spec yêu cầu**: vòng tiến trình hoàn tất vòng tròn ở 100% trước khi biến mất.
-- **Đã làm**: `pickRingTask` (lib/tasks.ts) lọc bỏ mọi task ở trạng thái `TERMINAL_STATUSES` (bao gồm `completed`) khỏi danh sách "live" — nên một task hoàn tất ở 95% làm vòng biến mất ngay tại 95%, không chạy tiếp tới 100%.
-- **Vì sao gác lại**: cosmetic, không ảnh hưởng đúng/sai. Follow-up.
+Không còn là sai lệch. Xem phần thân bài: vòng chạy nốt tới 100% rồi ẩn, và chỉ
+khi trạng thái cuối đúng là `completed`.
 
 ## 3. §5.2 "Hiện trong Finder" — không phải thiếu, là giới hạn nền tảng
 
@@ -66,3 +65,17 @@ xanh cũ (5.17:1). Đừng gộp hai hằng số này làm một.
 Điểm yếu đã biết: cam-500 trên thanh công cụ SÁNG chỉ đạt 2.14:1. Chấp nhận vì
 đây là đồ hoạ đặc chứ không phải chữ, và đường ray mờ bên dưới đã vạch sẵn hình
 tròn nên mắt vẫn bám được viền.
+
+## 7. CHƯA KIỂM THỰC TẾ: đường yt-dlp theo URL trang
+
+Các commit `d14e200` và `63d202a` mở đường hỏi `yt-dlp` bằng URL trang cho mọi
+site không có plugin riêng. Đã kiểm bằng máy: `tsc`, build, test backend
+(endpoint `/extractor` trả đúng một boolean).
+
+**Chưa kiểm bằng trình duyệt thật** — cần người dùng xác nhận:
+
+- YouTube, ganjing.com, xvideos: panel có hiện và ra danh sách chất lượng không.
+- Độ trễ `yt-dlp` trên từng site. Chưa đo. Nếu có site chậm thì panel đang chờ
+  vô hạn — cần thêm hạn giờ và thông báo rõ.
+- Site có plugin riêng: hành vi phải KHÔNG đổi (vẫn đi đường manifest).
+- Bộ nhớ đệm: mở lại cùng trang không được gọi `yt-dlp` lần hai.

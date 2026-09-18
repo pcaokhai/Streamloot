@@ -154,6 +154,18 @@ export async function startDownload(
 }
 
 /**
+ * Một task theo id, kể cả khi đã kết thúc.
+ *
+ * `/downloads/active` chỉ trả task chưa xong, nên khi một task biến mất khỏi
+ * danh sách ta không biết nó XONG hay bị HUỶ — hai thứ đó vòng tiến trình phải
+ * đối xử khác nhau. Hàm này cho câu trả lời chính xác thay vì đoán theo phần
+ * trăm cuối cùng.
+ */
+export function getTask(taskId: string): Promise<TaskRecord> {
+  return get<TaskRecord>(`/downloads/${encodeURIComponent(taskId)}`);
+}
+
+/**
  * URL này có plugin riêng xử lý không?
  *
  * Quyết định extension đi đường nào: có plugin thì manifest bắt được là đường

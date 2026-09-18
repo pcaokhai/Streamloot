@@ -13,8 +13,8 @@
  */
 import * as api from '../lib/api';
 import { BackendError } from '../lib/api';
-import { applyIconState } from '../lib/icon';
-import { nextPollMs } from '../lib/tasks';
+import { applyIconState, flashCompleted } from '../lib/icon';
+import { nextPollMs, pickRingTask } from '../lib/tasks';
 import type { Capture, TaskRecord, VideoInfoPayload } from '../lib/types';
 
 const MANIFEST_URL = /\.(m3u8|mpd)(\?|$)/i;
@@ -313,6 +313,28 @@ export default defineBackground(() => {
   let viewers = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * Task mà vòng tiến trình đang bám, để biết lúc nào nó kết thúc.
+   *
+   * `/downloads/active` chỉ trả task chưa xong, nên "biến mất khỏi danh sách"
+   * là tín hiệu duy nhất ta có. Nhưng biến mất vì XONG và biến mất vì bị HUỶ
+   * nhìn giống hệt nhau, nên phải hỏi lại trạng thái cuối — chỉ `completed`
+   * mới đáng cho vòng chạy nốt tới 100% (spec §5.3).
+   */
+  let ringTaskId: string | null = null;
+
+  async function notifyIfRingTaskFinished(tasks: TaskRecord[]): Promise<void> {
+    const previous = ringTaskId;
+    ringTaskId = pickRingTask(tasks)?.task_id ?? null;
+    if (!previous || tasks.some((t) => t.task_id === previous)) return;
+    try {
+      const finished = await api.getTask(previous);
+      if (finished.status === 'completed') await flashCompleted();
+    } catch {
+      // 404 (bản ghi đã bị xoá) hay app vừa tắt: không biết thì không ăn mừng.
+    }
+  }
+
   /** `null` = KHÔNG HỎI ĐƯỢC (khác hẳn mảng rỗng = hỏi được, và không có task). */
   async function refreshTasks(): Promise<TaskRecord[] | null> {
     try {
@@ -322,6 +344,9 @@ export default defineBackground(() => {
       // giờ luôn toàn cục nên không cần đếm stream bắt được nữa.
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       await applyIconState(tasks, tab?.id);
+      // Sau applyIconState: nếu vòng vừa mất task của nó, kiểm xem có phải đã
+      // xong để chạy nốt tới 100%.
+      await notifyIfRingTaskFinished(tasks);
       return tasks;
     } catch {
       // App tắt giữa chừng là chuyện bình thường. Không có dữ liệu mới thì

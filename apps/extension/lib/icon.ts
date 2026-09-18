@@ -78,14 +78,36 @@ export async function applyIconState(tasks: TaskRecord[], tabId?: number): Promi
 
   if (key === lastKey) return; // không đổi thì không vẽ
   lastKey = key;
+  await draw(task ? { pct: quantize5(task.progress), paused: task.status === 'paused' } : null);
+}
 
+/**
+ * Vòng chạy nốt tới 100% rồi ẩn hẳn (spec §5.3).
+ *
+ * Gọi khi một task vừa xong THẬT — người gọi phải tự xác nhận trạng thái cuối
+ * là `completed`, vì task bị huỷ cũng biến mất khỏi danh sách y hệt và không
+ * đáng được vẽ đầy vòng.
+ *
+ * Đặt `lastKey` thành khoá riêng để lần vẽ kế tiếp của applyIconState không bị
+ * chốt chặn vẽ thừa nuốt mất.
+ */
+export async function flashCompleted(holdMs = 900): Promise<void> {
+  lastKey = 'flash-completed';
+  await draw({ pct: 100, paused: false });
+  setTimeout(() => {
+    lastKey = null;
+    void draw(null);
+  }, holdMs);
+}
+
+async function draw(ring: { pct: number; paused: boolean } | null): Promise<void> {
   try {
     const canvas = new OffscreenCanvas(SIZE, SIZE);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const bmp = await baseBitmap();
 
-    if (!task) {
+    if (!ring) {
       // Rảnh: icon trần, vòng biến mất hẳn (spec §5.3).
       ctx.drawImage(bmp, 0, 0, SIZE, SIZE);
     } else {
@@ -97,7 +119,7 @@ export async function applyIconState(tasks: TaskRecord[], tabId?: number): Promi
       ctx.globalAlpha = BASE_ALPHA_WHILE_BUSY;
       ctx.drawImage(bmp, inset, inset, SIZE - inset * 2, SIZE - inset * 2);
       ctx.globalAlpha = 1;
-      const pct = quantize5(task.progress);
+      const pct = ring.pct;
       const r = SIZE / 2 - RING_W / 2;
       const TOP = -Math.PI / 2; // 12 giờ, như mọi vòng tiến trình khác
 
@@ -114,7 +136,7 @@ export async function applyIconState(tasks: TaskRecord[], tabId?: number): Promi
       ctx.arc(SIZE / 2, SIZE / 2, r, 0, 2 * Math.PI);
       ctx.stroke();
 
-      ctx.strokeStyle = task.status === 'paused' ? RING_GRAY : RING_ACTIVE;
+      ctx.strokeStyle = ring.paused ? RING_GRAY : RING_ACTIVE;
       ctx.lineCap = 'round';
       ctx.beginPath();
       // Cung tối thiểu ~4% để 0% vẫn thấy được là đã bắt đầu, thay vì trống trơn.
