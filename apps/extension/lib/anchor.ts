@@ -115,7 +115,7 @@ export function panelPos(
 }
 
 /** Rời chuột khỏi video bao lâu thì ẩn nút, ms. */
-export const FAB_HIDE_MS = 10_000;
+export const FAB_HIDE_MS = 5_000;
 /**
  * Thấy con trỏ trong khoảng này thì coi là "đang rê".
  *
