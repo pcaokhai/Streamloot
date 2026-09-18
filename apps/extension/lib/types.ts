@@ -35,6 +35,12 @@ export interface FormatOption {
   /** `'none'` nghĩa là luồng này không có tiếng. */
   acodec: string | null;
   recommended: boolean;
+  /**
+   * URL biến thể khi danh sách đọc thẳng từ master m3u8 (đường nhanh). Có nó
+   * thì tải bằng cách gửi URL này làm m3u8_url, không dùng format_id — id
+   * `hls-<bandwidth>` của yt-dlp không ổn định giữa các lần chạy.
+   */
+  url?: string | null;
 }
 
 export interface StartResult {

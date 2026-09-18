@@ -7,38 +7,71 @@
   z-index: 2147483647;
   width: 320px; /* khớp PANEL_W trong lib/anchor.ts */
   max-height: 70vh;
-  overflow: auto;
+  overflow: visible;
   box-sizing: border-box;
-  padding: 12px 14px;
+  padding: 0 0 6px;
   border-radius: 12px;
-  background: #1c1c1e;
+  background: #2b2b2e;
   color: #f2f2f7;
-  font: 13px/1.5 -apple-system, system-ui, sans-serif;
-  box-shadow: 0 8px 32px rgb(0 0 0 / 45%);
+  font: 15px/1.4 -apple-system, system-ui, sans-serif;
+  box-shadow: 0 10px 36px rgb(0 0 0 / 50%);
 }
-.sl-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.sl-title { font-weight: 600; flex: 1; }
-.sl-x { cursor: pointer; opacity: .55; background: none; border: 0; color: inherit; font-size: 15px; padding: 0 2px; }
+/* Mũi tên nhỏ chỉ lên nút, như popover của Cốc Cốc. Panel căn mép phải theo
+   nút nên mũi tên cũng nằm gần mép phải. */
+.sl-panel::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  right: 8px;
+  border: 7px solid transparent;
+  border-top: 0;
+  border-bottom-color: #2b2b2e;
+}
+.sl-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+}
+.sl-logo {
+  width: 26px; height: 26px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #f97316; color: #fff; font-weight: 700; font-size: 15px;
+}
+.sl-title { font-weight: 700; font-size: 18px; flex: 1; }
+.sl-x { cursor: pointer; opacity: .6; background: none; border: 0; color: inherit; font-size: 18px; padding: 0 2px; }
 .sl-x:hover { opacity: 1; }
-.sl-sub { font-size: 11px; opacity: .55; margin-bottom: 10px; word-break: break-all; }
-.sl-msg { margin-top: 8px; font-size: 12px; opacity: .8; }
+.sl-msg { padding: 6px 14px 2px; font-size: 12px; opacity: .7; }
 .sl-err { color: #ff9f9f; }
+/* Nhiều stream: ô chọn tô tối cho hợp panel, không để mặc định trắng của trang. */
+.sl-panel select {
+  margin: 8px 14px 0; width: calc(100% - 28px);
+  background: #3a3a3d; color: inherit; border: 1px solid rgba(255,255,255,.12);
+  border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px;
+}
 
-.sl-list { max-height: 320px; overflow-y: auto; margin: 6px 0; }
+.sl-list { max-height: 320px; overflow-y: auto; padding: 4px 6px 0; }
 .sl-group {
-  font-size: 11px; opacity: .65; margin: 8px 0 2px; letter-spacing: .02em;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 8px 6px; font-size: 14px; font-weight: 600; opacity: .55;
+  letter-spacing: .04em;
 }
+.sl-group-ic { font-size: 16px; width: 18px; text-align: center; }
+/* Ba cột: tên cấp (rộng) · độ phân giải · đuôi — thẳng cột giữa các dòng. */
 .sl-row-item {
-  display: flex; justify-content: space-between; align-items: center; gap: 10px;
-  padding: 7px 8px; border-radius: 6px; cursor: pointer;
+  display: grid; grid-template-columns: 1fr 90px 60px; align-items: center;
+  padding: 9px 8px 9px 34px; border-radius: 8px; cursor: pointer;
 }
-.sl-row-item:hover { background: rgba(249, 115, 22, .16); }
+.sl-row-item:hover { background: rgba(249, 115, 22, .18); }
 /* Đang gửi lệnh tải: khoá dòng lại để bấm dồn không sinh hai lần tải. */
 .sl-row-item.sl-pending { opacity: .5; cursor: default; pointer-events: none; }
-.sl-row-label { font-weight: 600; }
-.sl-row-detail { font-size: 11px; opacity: .7; white-space: nowrap; }
-/* Dòng yt-dlp tự chọn: đánh dấu nhẹ, không cướp sự chú ý khỏi các dòng khác. */
-.sl-rec .sl-row-label::after { content: ' ★'; color: #f97316; }
+.sl-row-label { font-weight: 700; }
+.sl-row-res, .sl-row-ext { opacity: .8; }
+.sl-row-ext { text-align: right; }
+/* Dòng khuyên chọn: chấm cam nhỏ sau tên, không cướp sự chú ý khỏi các dòng khác. */
+.sl-rec .sl-row-label::after {
+  content: ''; display: inline-block; width: 8px; height: 8px; margin-left: 6px;
+  border-radius: 50%; background: #f97316; vertical-align: middle;
+}
 
 /* Nút nổi: đủ rõ để thấy trên nền video bất kỳ, đủ nhỏ để không chắn nội dung. */
 .sl-fab {
@@ -56,6 +89,9 @@
   /* Viền sáng để không chìm vào cảnh tối, bóng để không chìm vào cảnh sáng. */
   border: 1px solid rgba(255, 255, 255, .35);
   box-shadow: 0 2px 8px rgba(0, 0, 0, .45);
-  transition: background .15s, transform .15s;
+  transition: background .15s, transform .15s, opacity .2s;
 }
 .sl-fab:hover { background: #f97316; transform: scale(1.08); }
+/* Ẩn theo hover (shouldHideFab): mờ đi và không ăn chuột, vẫn giữ chỗ để
+   quay lại không nhảy. */
+.sl-fab.sl-hidden { opacity: 0; pointer-events: none; }

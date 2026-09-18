@@ -1,4 +1,4 @@
-import { groupFormats, humanSize } from '../.tmp-formats.mjs';
+import { groupFormats, humanSize, qualityName } from '../.tmp-formats.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -62,6 +62,20 @@ t('số âm coi như không biết', () => humanSize(-5), '');
 
 // --- rỗng ---
 t('không có format nào', () => groupFormats([]), { video: [], audio: [] });
+
+// --- tên cấp chất lượng (cột 1 của panel, thang IDM/Cốc Cốc) ---
+t('720 là HD', () => qualityName(720), 'HD');
+t('1080 là Full HD', () => qualityName(1080), 'Full HD');
+t('480 là Standard', () => qualityName(480), 'Standard');
+t('360 là Medium', () => qualityName(360), 'Medium');
+t('2160 là 4K', () => qualityName(2160), '4K');
+t('không rõ chiều cao thì rỗng, không bịa', () => qualityName(null), '');
+t('dòng mang name/ext/url từ format',
+  () => groupFormats([{ format_id: 'a', ext: 'mp4', resolution: '', height: 720, filesize: null, vcodec: 'v', acodec: 'a', recommended: false, url: 'https://cdn.example.test/720/i.m3u8' }]).video[0],
+  { formatId: 'a', label: '720p', detail: 'mp4', recommended: false, name: 'HD', ext: 'mp4', url: 'https://cdn.example.test/720/i.m3u8' });
+t('không có url thì null, không phải undefined',
+  () => groupFormats([{ format_id: 'a', ext: 'mp4', resolution: '', height: 480, filesize: null, vcodec: 'v', acodec: 'a', recommended: false }]).video[0].url,
+  null);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

@@ -14,6 +14,28 @@ export interface FormatRow {
   /** Dòng phụ: "mp4 · 12.3 MB" */
   detail: string;
   recommended: boolean;
+  /** Tên cấp chất lượng kiểu Cốc Cốc: "HD", "Standard"… — cột 1 của panel. */
+  name: string;
+  /** Đuôi file: "mp4" — cột 3 của panel. */
+  ext: string;
+  /** URL biến thể HLS nếu có (đường manifest nhanh); null thì tải theo formatId. */
+  url: string | null;
+}
+
+/**
+ * Tên cấp chất lượng theo chiều cao, cùng thang với IDM/Cốc Cốc để người dùng
+ * quen tay không phải học lại. Không rõ chiều cao thì trả rỗng — panel sẽ chỉ
+ * hiện độ phân giải, không bịa tên.
+ */
+export function qualityName(height: number | null | undefined): string {
+  if (typeof height !== 'number' || height <= 0) return '';
+  if (height >= 2160) return '4K';
+  if (height >= 1440) return '2K';
+  if (height >= 1080) return 'Full HD';
+  if (height >= 720) return 'HD';
+  if (height >= 480) return 'Standard';
+  if (height >= 360) return 'Medium';
+  return 'Low';
 }
 
 /**
@@ -47,6 +69,9 @@ function rowFor(f: FormatOption): FormatRow {
     label: labelFor(f),
     detail: size ? `${f.ext} · ${size}` : f.ext,
     recommended: f.recommended,
+    name: f.vcodec === 'none' ? 'Audio' : qualityName(f.height),
+    ext: f.ext,
+    url: f.url ?? null,
   };
 }
 

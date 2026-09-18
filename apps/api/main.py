@@ -719,6 +719,16 @@ def get_formats_prepared(payload: VideoInfoPayload):
     /api/v1/formats thì lại tự extract từ URL, tức mở Chromium lần nữa — đúng
     cái ~30s mà cả Phương án 2 sinh ra để tránh.
     """
+    # Đường nhanh: đọc thẳng master playlist (một GET) — cách IDM/Cốc Cốc làm.
+    # Không ra biến thể nào (DASH, HLS một luồng, lỗi mạng) mới tốn công spawn
+    # yt-dlp. Manifest lỗi không được phép chặn đường cũ, nên bọc riêng.
+    try:
+        from services.manifest_probe import list_variants, variants_to_formats
+        variants = list_variants(payload.m3u8_url, payload.referer, payload.user_agent)
+        if variants:
+            return {"title": payload.title, "formats": variants_to_formats(variants)}
+    except Exception as e:
+        Logger.error(f"Đường manifest hỏng, lùi về yt-dlp: {e}", exc_info=True)
     try:
         formats = YtDlpDownloader().list_formats(payload.to_video_info())
         return {"title": payload.title, "formats": formats}

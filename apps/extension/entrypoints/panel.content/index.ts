@@ -15,7 +15,7 @@
 import './style.css';
 import type { Capture, FormatOption, VideoInfoPayload } from '../../lib/types';
 import { pickCapture } from '../../lib/pick';
-import { pickAnchor, buttonPos, panelPos, BTN_SIZE, BTN_PAD } from '../../lib/anchor';
+import { pickAnchor, buttonPos, panelPos, shouldHideFab, BTN_SIZE, BTN_PAD, FAB_HIDE_MS } from '../../lib/anchor';
 import { groupFormats } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
@@ -147,6 +147,46 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
 
     let anchored: HTMLVideoElement | null = null;
 
+    // Nút chỉ hiện khi rê chuột vào video, nán lại FAB_HIDE_MS rồi ẩn — như
+    // thanh nút của Cốc Cốc. Quyết định ẩn/hiện nằm ở shouldHideFab (có test);
+    // ở đây chỉ là nối sự kiện chuột và một bộ hẹn giờ.
+    let hovering = false;
+    let leftAt = 0; // 0 = chưa từng rê vào -> coi như rời từ lâu -> ẩn
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    let hoverTarget: HTMLVideoElement | null = null;
+
+    function applyFabVisibility(): void {
+      fab.classList.toggle('sl-hidden', shouldHideFab({
+        hovering,
+        panelOpen: mounted,
+        anchored: anchored !== null,
+        msSinceLeave: Date.now() - leftAt,
+      }));
+    }
+    function setHover(on: boolean): void {
+      hovering = on;
+      clearTimeout(hideTimer);
+      if (!on) {
+        leftAt = Date.now();
+        // +20ms để lúc hẹn giờ nổ, msSinceLeave đã chắc chắn >= FAB_HIDE_MS.
+        hideTimer = setTimeout(applyFabVisibility, FAB_HIDE_MS + 20);
+      }
+      applyFabVisibility();
+    }
+    const onEnter = () => setHover(true);
+    const onLeave = () => setHover(false);
+    fab.addEventListener('mouseenter', onEnter);
+    fab.addEventListener('mouseleave', onLeave);
+    /** Video neo đổi thì chuyển listener chuột sang cái mới, gỡ khỏi cái cũ. */
+    function bindHover(v: HTMLVideoElement | null): void {
+      if (v === hoverTarget) return;
+      hoverTarget?.removeEventListener('mouseenter', onEnter);
+      hoverTarget?.removeEventListener('mouseleave', onLeave);
+      hoverTarget = v;
+      v?.addEventListener('mouseenter', onEnter);
+      v?.addEventListener('mouseleave', onLeave);
+    }
+
     /** Đo lại và đặt nút. Gọi từ observer, không từ bộ đếm. */
     function place(): void {
       const vids = [...document.querySelectorAll('video')] as HTMLVideoElement[];
@@ -169,6 +209,8 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       fab.style.top = `${pos.top}px`;
       fab.style.left = `${pos.left}px`;
       placePanel(pos);
+      bindHover(anchored);
+      applyFabVisibility();
     }
 
     /**
@@ -298,11 +340,12 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       root.innerHTML = '';
       const head = document.createElement('div');
       head.className = 'sl-head';
+      const logo = document.createElement('span');
+      logo.className = 'sl-logo';
+      logo.textContent = '⤓';
       const title = document.createElement('div');
       title.className = 'sl-title';
-      title.textContent = byUrl
-        ? 'Streamloot — trang này'
-        : `Streamloot — ${captures.length} stream`;
+      title.textContent = 'Chọn để tải';
       const close = document.createElement('button');
       close.className = 'sl-x';
       close.textContent = '✕';
@@ -311,14 +354,9 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         // (nó sống chung shadow host với panel), mà nút phải còn đó để mở lại.
         mounted = false;
         root.style.display = 'none';
+        setHover(false);
       };
-      head.append(title, close);
-
-      const sub = document.createElement('div');
-      sub.className = 'sl-sub';
-      sub.textContent = byUrl
-        ? `${location.hostname} · hỏi qua yt-dlp`
-        : `${cap!.host} · ${fmtDur(cap!.durationSec)}`;
+      head.append(logo, title, close);
 
       // Nhiều stream thì cho chọn tay: phép đo thời lượng đúng gần hết các lần,
       // nhưng khi nó sai thì người dùng phải có đường sửa, chứ không phải tải về
@@ -348,7 +386,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       const msg = document.createElement('div');
       msg.className = 'sl-msg';
 
-      root.append(head, sub);
+      root.append(head);
       if (picker) root.append(picker);
       root.append(list, msg);
 
@@ -371,26 +409,34 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       function addRow(row: FormatRow): void {
         const el = document.createElement('div');
         el.className = row.recommended ? 'sl-row-item sl-rec' : 'sl-row-item';
-        const left = document.createElement('span');
-        left.className = 'sl-row-label';
-        left.textContent = row.label;
-        const right = document.createElement('span');
-        right.className = 'sl-row-detail';
-        right.textContent = row.detail;
-        el.append(left, right);
+        // Ba cột như Cốc Cốc: tên cấp · độ phân giải · đuôi. Không rõ tên cấp
+        // thì cột 1 lấy luôn độ phân giải, cột 2 để trống — không bịa.
+        const c1 = document.createElement('span');
+        c1.className = 'sl-row-label';
+        c1.textContent = row.name || row.label;
+        const c2 = document.createElement('span');
+        c2.className = 'sl-row-res';
+        c2.textContent = row.name ? row.label : '';
+        const c3 = document.createElement('span');
+        c3.className = 'sl-row-ext';
+        c3.textContent = row.ext ? `.${row.ext}` : '';
+        el.append(c1, c2, c3);
         el.onclick = () => {
           if (!canSubmit(pending)) return; // đang bay — bấm thêm không làm gì
-          void startDownload(row.formatId);
+          void startDownload(row);
         };
         rowEls.push(el);
         list.append(el);
       }
 
-      function addGroup(title: string, rows: FormatRow[]): void {
+      function addGroup(title: string, icon: string, rows: FormatRow[]): void {
         if (!rows.length) return;
         const h = document.createElement('div');
         h.className = 'sl-group';
-        h.textContent = title;
+        const ic = document.createElement('span');
+        ic.className = 'sl-group-ic';
+        ic.textContent = icon;
+        h.append(ic, document.createTextNode(title));
         list.append(h);
         for (const r of rows) addRow(r);
       }
@@ -402,15 +448,20 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
        * sau khi bàn giao. Muốn xem tiến trình thì mở popup, hoặc nhìn vòng trên
        * icon. Để panel ở lại là chắn mất video người dùng đang xem.
        */
-      async function startDownload(formatId: string): Promise<void> {
+      async function startDownload(row: FormatRow): Promise<void> {
         setPending(true);
         say('Đang bắt đầu…');
         let r: { ok: boolean; error?: string };
+        // Dòng lấy từ master m3u8 mang URL biến thể: tải bằng chính URL đó làm
+        // m3u8_url và bỏ format_id — yt-dlp tải thẳng media playlist, không
+        // phải dò lại. format_id `hls-<bandwidth>` của nó không ổn định.
+        const info = row.url && payload ? { ...payload, m3u8_url: row.url } : payload;
+        const formatId = row.url ? null : row.formatId || null;
         try {
           r = await ask<{ ok: boolean; error?: string }>(
             byUrl
               ? { type: 'startByUrl', url: location.href, formatId }
-              : { type: 'startDownload', info: payload!, formatId },
+              : { type: 'startDownload', info: info!, formatId },
           );
         } catch (err) {
           say(err instanceof Error ? err.message : String(err), true);
@@ -429,6 +480,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         mounted = false;
         setPending(false); // mở lại panel lần sau phải bấm được ngay, không kẹt
         root.style.display = 'none';
+        setHover(false); // panel đóng thì nút bắt đầu đếm giờ ẩn
       }
 
       // Nạp danh sách chất lượng ngay — người dùng chọn TRƯỚC khi bàn giao, đúng
@@ -453,14 +505,15 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
           // Không lấy được danh sách KHÔNG chặn việc tải (§7): vẫn cho một dòng
           // để backend tự chọn chất lượng tốt nhất.
           say(r.error ?? 'Không lấy được danh sách chất lượng');
-          addGroup('🎬 VIDEO', [{
+          addGroup('VIDEO', '▭', [{
             formatId: '', label: 'Chất lượng tốt nhất', detail: 'backend tự chọn', recommended: true,
+            name: '', ext: '', url: null,
           }]);
           return;
         }
         const { video, audio } = groupFormats(r.formats ?? []);
-        addGroup('🎬 VIDEO', video);
-        addGroup('🎵 ÂM THANH', audio);
+        addGroup('VIDEO', '▭', video);
+        addGroup('ÂM THANH', '♪', audio);
         if (!video.length && !audio.length) {
           say('Không có chất lượng nào để chọn', true);
         } else {
@@ -491,6 +544,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // ui.mount() đã chạy ngay từ đầu (để nút hiện ra) — bấm nút chỉ còn việc
       // mở panel ra và vẽ nội dung, không cần mount lại.
       mounted = true;
+      applyFabVisibility();
       // Đặt panel theo vị trí HIỆN TẠI của nút trước khi hiện — nút có thể đã
       // dời chỗ từ lần placePanel gần nhất mà panel lúc đó chưa được mount.
       placePanel({ top: parseFloat(fab.style.top) || 0, left: parseFloat(fab.style.left) || 0 });

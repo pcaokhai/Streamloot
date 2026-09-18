@@ -113,3 +113,24 @@ export function panelPos(
     left: clamp(btn.left + btnSize - PANEL_W, pad, view.width - pad - PANEL_W),
   };
 }
+
+/** Rời chuột khỏi video bao lâu thì ẩn nút, ms. */
+export const FAB_HIDE_MS = 10_000;
+
+/**
+ * Nút có được ẩn không.
+ *
+ * Nút chỉ hiện khi chuột đang ở trên video (hoặc trên chính nút), và còn nán
+ * lại FAB_HIDE_MS sau khi chuột rời đi — để người dùng kịp đưa chuột lên bấm.
+ * Hai ngoại lệ không bao giờ ẩn: panel đang mở (ẩn nút lúc đó là mất mốc), và
+ * không neo được vào video nào (spec §5.1.1: nút ở góc cửa sổ phải luôn bấm được).
+ */
+export function shouldHideFab(o: {
+  hovering: boolean;
+  panelOpen: boolean;
+  anchored: boolean;
+  msSinceLeave: number;
+}): boolean {
+  if (!o.anchored || o.panelOpen || o.hovering) return false;
+  return o.msSinceLeave >= FAB_HIDE_MS;
+}

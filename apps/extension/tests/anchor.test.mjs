@@ -1,4 +1,4 @@
-import { pickAnchor, buttonPos, panelPos, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX, PANEL_W, PANEL_GAP } from '../.tmp-anchor.mjs';
+import { pickAnchor, buttonPos, panelPos, shouldHideFab, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX, PANEL_W, PANEL_GAP, FAB_HIDE_MS } from '../.tmp-anchor.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -62,6 +62,14 @@ t('nút sát đáy: panel được kéo lên để còn lộ ra',
 t('nút sát mép phải: panel không tràn ra ngoài phải',
   () => panelPos({ top: 100, left: 1190 }, BTN_SIZE, BTN_PAD, PV).left + PANEL_W <= PV.width,
   true);
+
+// --- ẩn/hiện nút theo hover ---
+const base = { hovering: false, panelOpen: false, anchored: true, msSinceLeave: FAB_HIDE_MS };
+t('rời chuột đủ lâu thì ẩn', () => shouldHideFab(base), true);
+t('rời chuột chưa đủ lâu thì còn hiện', () => shouldHideFab({ ...base, msSinceLeave: FAB_HIDE_MS - 1 }), false);
+t('đang rê chuột thì không ẩn', () => shouldHideFab({ ...base, hovering: true }), false);
+t('panel đang mở thì không ẩn', () => shouldHideFab({ ...base, panelOpen: true }), false);
+t('không neo được video thì luôn hiện (§5.1.1)', () => shouldHideFab({ ...base, anchored: false }), false);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
