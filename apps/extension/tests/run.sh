@@ -10,4 +10,6 @@ npx esbuild lib/tasks.ts --bundle --format=esm --outfile=.tmp-tasks.mjs --log-le
 node tests/tasks.test.mjs
 npx esbuild lib/formats.ts --bundle --format=esm --outfile=.tmp-formats.mjs --log-level=error
 node tests/formats.test.mjs
-rm -f .tmp-pick.mjs .tmp-tasks.mjs .tmp-formats.mjs
+npx esbuild lib/anchor.ts --bundle --format=esm --outfile=.tmp-anchor.mjs --log-level=error
+node tests/anchor.test.mjs
+rm -f .tmp-pick.mjs .tmp-tasks.mjs .tmp-formats.mjs .tmp-anchor.mjs
