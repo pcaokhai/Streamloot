@@ -92,3 +92,32 @@ thẳng hàng góc phải (`buttonPos`: `top = rect.top - size - pad`, kẹp xu�
 hàng, kẹp trong khung nhìn (`panelPos` trong `lib/anchor.ts`, có test); được
 đặt lại mỗi lần `place()` chạy nên bám theo khi cuộn. Không lật panel lên
 trên khi thiếu chỗ — chỉ kẹp để còn lộ 200px, phần dư panel tự cuộn.
+
+## 8. Liệt kê chất lượng đọc thẳng trong extension (declarativeNetRequest)
+
+Spec §4.2 giả định mọi lời gọi mạng đều đi qua backend. Đo thật cho thấy đường
+đó chậm: backend phải spawn `yt-dlp -J` (riêng khởi động ~0.38s, chưa kể nó tự
+tải master rồi tải thêm một biến thể để dò), nên panel đứng "Đang lấy danh
+sách…" vài giây.
+
+Đọc kiến trúc của một extension tải video phổ biến (bản dựng để trong `ref/`,
+đã gitignore — chỉ đọc kiến trúc, không chép mã) cho thấy cách làm: `fetch` bị
+cấm đặt `Referer`, nhưng `declarativeNetRequest.updateSessionRules` với
+`modifyHeaders` thì đặt được, và gỡ rule ngay sau khi gọi. Nhờ đó service
+worker tự tải master m3u8 và phân tích tại chỗ — một request.
+
+Chốt: thêm quyền `declarativeNetRequest`; `lib/m3u8.ts` phân tích master
+(thuần, có test), `lib/dnr.ts` cài/gỡ rule quanh đúng một lời gọi. Vẫn GIỮ
+đường backend làm dự phòng — thiếu quyền, mạng hỏng, hoặc không phải master
+thì lùi về như cũ. `variantsFromManifest` trả `null` (không kết luận được) chứ
+không trả `[]`, để hai trạng thái đó không bị gộp.
+
+Hai bài học khác lấy từ cùng nguồn, đã áp dụng:
+- **Playlist phụ đề cũng là `.m3u8` hợp lệ.** Chỉ nhìn đuôi là mời người dùng
+  tải một tệp `.vtt` và gọi nó là video. `isSubtitlePlaylist` loại nó ra.
+- **Phạm vi rule phải là THƯ MỤC chứa playlist** (`new URL('.', url) + '*'`),
+  không phải đúng một URL: segment nằm cạnh playlist và cần cùng header.
+
+Chưa áp dụng, ghi lại để cân nhắc: họ dùng `offscreen` (reason `WORKERS`) để
+chạy Web Worker vì service worker MV3 không spawn được worker — mình không cần,
+việc tải nặng đã nằm ở backend Python.

@@ -17,7 +17,11 @@ export default defineConfig({
     // Store soi permission rất kỹ, và người dùng cũng vậy.
     // `alarms`: nhịp 60s khi không có bề mặt nào mở (spec §4.2). Không dùng
     // setInterval trong service worker — MV3 thu hồi worker và bộ đếm chết theo.
-    permissions: ['webRequest', 'storage', 'tabs', 'alarms'],
+    // `declarativeNetRequest`: đường DUY NHẤT hợp lệ để đặt `Referer` cho
+    // `fetch` của chính extension (fetch cấm header này). Nhờ đó service worker
+    // tự đọc được master m3u8 và liệt kê chất lượng ngay, không phải đợi backend
+    // spawn yt-dlp. Rule được tạo theo phiên và gỡ ngay sau mỗi lần gọi.
+    permissions: ['webRequest', 'storage', 'tabs', 'alarms', 'declarativeNetRequest'],
 
     // Extension phải quan sát được site bất kỳ người dùng mở. Đây là quyền rộng
     // nhất Chrome có — thu hẹp được thì nên thu, nhưng danh sách site không biết

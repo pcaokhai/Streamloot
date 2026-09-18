@@ -16,7 +16,9 @@ import { BackendError } from '../lib/api';
 import { applyIconState, flashCompleted } from '../lib/icon';
 import { cacheTasks } from '../lib/cache';
 import { nextPollMs, pickRingTask, shouldCacheFormatFailure } from '../lib/tasks';
-import type { Capture, TaskRecord, VideoInfoPayload } from '../lib/types';
+import { canSetHeaders, dirFilter, withHeaders } from '../lib/dnr';
+import { isMaster, isSubtitlePlaylist, parseMaster, variantsToFormats } from '../lib/m3u8';
+import type { Capture, FormatOption, TaskRecord, VideoInfoPayload } from '../lib/types';
 
 const MANIFEST_URL = /\.(m3u8|mpd)(\?|$)/i;
 const MANIFEST_TYPE = /(mpegurl|dash\+xml)/i;
@@ -169,10 +171,7 @@ export default defineBackground(() => {
     // Origin) trả 401. Service worker thì có đúng origin
     // `chrome-extension://<id>`. Đây là lý do kiến trúc, không phải tuỳ chọn.
     if (m?.type === 'listFormats' && m.info) {
-      return api
-        .listFormats(m.info)
-        .then((r) => ({ ok: true as const, formats: r.formats }))
-        .catch((e: unknown) => ({ ok: false as const, error: errorText(e) }));
+      return listFormats(m.info);
     }
 
     if (m?.type === 'startDownload' && m.info) {
@@ -267,7 +266,56 @@ export default defineBackground(() => {
     }
   }
 
-  async function formatsByUrl(url: string) {
+  /**
+ * Đọc master m3u8 NGAY TRONG extension.
+ *
+ * Nhanh hơn hẳn đường backend: một request thay vì spawn yt-dlp (riêng khởi
+ * động đã ~0.4s, chưa kể nó tự tải master rồi tải thêm một biến thể để dò).
+ * Chạy được là nhờ declarativeNetRequest đặt hộ `Referer` — thứ `fetch` bị cấm.
+ *
+ * Trả `null` khi KHÔNG kết luận được (thiếu quyền, mạng hỏng, không phải
+ * master) — khác hẳn `[]` nghĩa là "đọc được và thật sự không có biến thể nào".
+ * Người gọi phải phân biệt hai cái: một cái lùi về backend, một cái thì không.
+ */
+async function variantsFromManifest(info: VideoInfoPayload): Promise<FormatOption[] | null> {
+  if (!canSetHeaders() || !info.m3u8_url) return null;
+  const headers: Record<string, string> = {};
+  if (info.referer) headers.Referer = info.referer;
+  if (info.origin) headers.Origin = info.origin;
+
+  let text: string;
+  try {
+    text = await withHeaders(
+      [{ urlFilter: dirFilter(info.m3u8_url), headers }],
+      async () => {
+        const res = await fetch(info.m3u8_url, { credentials: 'omit' });
+        if (!res.ok) throw new Error(`manifest trả ${res.status}`);
+        return res.text();
+      },
+    );
+  } catch (err) {
+    console.warn('[Streamloot] đọc manifest trong extension hỏng, lùi về backend:', err);
+    return null;
+  }
+
+  // Playlist phụ đề cũng là .m3u8 hợp lệ — mời tải nó là đưa người dùng một
+  // tệp .vtt và gọi đó là video.
+  if (isSubtitlePlaylist(text)) return null;
+  if (!isMaster(text)) return null; // media playlist một luồng: không có gì để chọn
+  const formats = variantsToFormats(parseMaster(text, info.m3u8_url));
+  return formats.length ? formats : null;
+}
+
+async function listFormats(info: VideoInfoPayload) {
+  const quick = await variantsFromManifest(info);
+  if (quick) return { ok: true as const, formats: quick };
+  return api
+    .listFormats(info)
+    .then((r) => ({ ok: true as const, formats: r.formats }))
+    .catch((e: unknown) => ({ ok: false as const, error: errorText(e) }));
+}
+
+async function formatsByUrl(url: string) {
     const hit = formatCache.get(url);
     if (hit) return hit;
     let result;
