@@ -2,11 +2,10 @@
 
 Written vì `CLAUDE.md` coi `docs/` là nguồn sự thật, và bảng coverage của plan hiện đang nhận vơ các mục dưới đây là "đã làm". Không đúng — ghi lại để không ai tin nhầm.
 
-## 1. §4.1 / D1 local cache (storage.session / storage.local) — chưa làm
+## 1. §4.1 / D1 local cache — ĐÃ LÀM
 
-- **Spec yêu cầu**: task đang chạy cache vào `storage.session`, 20 dòng lịch sử gần nhất cache vào `storage.local`, để popup mở lên có ngay dữ liệu cũ trong lúc chờ round-trip.
-- **Đã làm**: `lastKnownTasks` trong `background.ts` chỉ là biến in-memory phục vụ vẽ icon, không phải cache cho popup đọc. Popup gọi thẳng backend mỗi lần mở, không có gì để hiện nếu request chậm hoặc lỗi — hiện thông báo lỗi thay vì danh sách cũ.
-- **Vì sao gác lại**: đây là cải thiện độ trễ cảm nhận (perceived latency), không phải đúng/sai chức năng. Nhánh này đã dài, làm thêm cache có state đồng bộ hai chiều là việc riêng.
+Không còn là sai lệch. Task cache vào `storage.session`, 20 dòng lịch sử gần
+nhất vào `storage.local`, popup gieo cache trước rồi mới thay bằng dữ liệu thật.
 
 ## 2. §5.3 "vòng chạy tới 100% rồi mới ẩn" — ĐÃ LÀM
 

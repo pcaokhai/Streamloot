@@ -14,6 +14,7 @@
 import * as api from '../lib/api';
 import { BackendError } from '../lib/api';
 import { applyIconState, flashCompleted } from '../lib/icon';
+import { cacheTasks } from '../lib/cache';
 import { nextPollMs, pickRingTask } from '../lib/tasks';
 import type { Capture, TaskRecord, VideoInfoPayload } from '../lib/types';
 
@@ -340,6 +341,10 @@ export default defineBackground(() => {
     try {
       const { tasks } = await api.getActiveTasks();
       setLastKnownTasks(tasks);
+      // Cache cho popup mở ra hiện ngay (D1). Không await: popup đọc được bản
+      // cũ một nhịp cũng chẳng sao, còn chặn vòng poll vì một lượt ghi storage
+      // thì không đáng.
+      void cacheTasks(tasks);
       // Hỏi tab đang mở chỉ để gỡ badge theo-tab còn sót từ bản cũ; badge bây
       // giờ luôn toàn cục nên không cần đếm stream bắt được nữa.
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });

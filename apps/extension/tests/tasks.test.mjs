@@ -1,4 +1,4 @@
-import { pickRingTask, quantize5, badgeFor, nextPollMs, iconKey, relativeTime, BADGE_ORANGE, BADGE_GRAY }
+import { pickRingTask, quantize5, badgeFor, nextPollMs, iconKey, relativeTime, trimHistory, HISTORY_CACHE_MAX, BADGE_ORANGE, BADGE_GRAY }
   from '../.tmp-tasks.mjs';
 
 let pass = 0, fail = 0;
@@ -95,6 +95,14 @@ t('chuỗi rỗng không ném lỗi, trả rỗng', relativeTime('', NOW), '');
 t('null không ném lỗi, trả rỗng', relativeTime(null, NOW), '');
 t('undefined không ném lỗi, trả rỗng', relativeTime(undefined, NOW), '');
 t('chuỗi hỏng không ném lỗi, trả rỗng', relativeTime('không phải ngày giờ', NOW), '');
+
+// --- trimHistory: cache lịch sử (spec §4.1) ---
+t('giữ đúng 20 dòng', trimHistory(Array.from({length: 50}, (_, i) => i)).length, 20);
+t('ít hơn 20 thì giữ nguyên', trimHistory([1, 2, 3]).length, 3);
+t('rỗng vẫn rỗng', trimHistory([]).length, 0);
+t('giữ phần ĐẦU vì backend trả mới nhất trước',
+  trimHistory(['moi', 'giua', 'cu'], 2), ['moi', 'giua']);
+t('hằng số đúng 20', HISTORY_CACHE_MAX, 20);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

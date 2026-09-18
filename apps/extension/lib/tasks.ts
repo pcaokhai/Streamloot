@@ -120,3 +120,16 @@ export function relativeTime(createdAt: string | null | undefined, now: number =
   if (diffDay === 1) return 'hôm qua';
   return `${diffDay} ngày trước`;
 }
+
+/** Số dòng lịch sử giữ trong cache local (spec §4.1). */
+export const HISTORY_CACHE_MAX = 20;
+
+/**
+ * Cắt lịch sử xuống số dòng được phép cache.
+ *
+ * Giữ phần ĐẦU vì backend trả mới nhất trước — cắt nhầm đuôi thì cache toàn
+ * dòng cũ nhất, tức mở popup ra thấy đúng thứ không ai cần.
+ */
+export function trimHistory<T>(rows: T[], max: number = HISTORY_CACHE_MAX): T[] {
+  return rows.slice(0, max);
+}

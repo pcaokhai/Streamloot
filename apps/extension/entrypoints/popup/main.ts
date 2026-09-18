@@ -1,4 +1,5 @@
 import * as api from '../../lib/api';
+import { cacheHistory, readCachedHistory, readCachedTasks } from '../../lib/cache';
 import { loadSettings } from '../../lib/settings';
 import { relativeTime } from '../../lib/tasks';
 import type { Capture, HistoryRow, TaskRecord } from '../../lib/types';
@@ -26,6 +27,14 @@ let renderSeq = 0;
  * Popup là extension page nên `fetch` mang đúng quyền host (spec §4.2); đi vòng
  * qua service worker chỉ thêm một chặng có thể chết giữa chừng.
  */
+/**
+ * Đã vẽ danh sách bằng DỮ LIỆU THẬT chưa.
+ *
+ * Cache chỉ được phép lấp chỗ trống lúc chưa có gì. Nếu request thật về trước
+ * (mạng nhanh hơn đọc storage) thì bản cache tới sau không được ghi đè.
+ */
+let paintedLive = false;
+
 async function renderTasks(): Promise<void> {
   const mine = ++renderSeq;
   const box = el('tasks');
@@ -35,12 +44,20 @@ async function renderTasks(): Promise<void> {
   } catch (err) {
     // Response cũ về muộn thì bỏ: vẽ nó lên là xoá mất trạng thái người dùng vừa đổi.
     if (mine !== renderSeq) return;
-    box.innerHTML = '<div class="empty">Không đọc được danh sách tải.</div>';
+    // Còn cache thì giữ danh sách cũ trên màn hình, chỉ báo lỗi bên dưới — xoá
+    // sạch rồi hiện một dòng lỗi là mất luôn thứ người dùng đang nhìn.
+    if (!paintedLive) box.innerHTML = '<div class="empty">Không đọc được danh sách tải.</div>';
     console.error('Streamloot renderTasks:', err);
     el('err').textContent = err instanceof Error ? err.message : String(err);
     return;
   }
   if (mine !== renderSeq) return;
+  paintedLive = true;
+  paintTasks(tasks);
+}
+
+function paintTasks(tasks: TaskRecord[]): void {
+  const box = el('tasks');
   const live = tasks.filter((t) => !TERMINAL_STATUSES.has(t.status));
   if (!live.length) {
     box.innerHTML = '<div class="empty">Không có gì đang tải.</div>';
@@ -69,17 +86,27 @@ async function renderTasks(): Promise<void> {
   }).join('');
 }
 
+let paintedLiveHistory = false;
+
 async function renderHistory(): Promise<void> {
   const box = el('history');
   let rows: HistoryRow[];
   try {
     rows = await api.getHistory('extension');
+    void cacheHistory(rows);
   } catch (err) {
-    box.innerHTML = '<div class="empty">Không đọc được lịch sử.</div>';
+    // Giữ bản cache đang hiện nếu có — xoá đi rồi báo lỗi là mất cả hai.
+    if (!paintedLiveHistory) box.innerHTML = '<div class="empty">Không đọc được lịch sử.</div>';
     console.error('Streamloot renderHistory:', err);
     el('err').textContent = err instanceof Error ? err.message : String(err);
     return;
   }
+  paintedLiveHistory = true;
+  paintHistory(rows);
+}
+
+function paintHistory(rows: HistoryRow[]): void {
+  const box = el('history');
   if (!rows.length) {
     box.innerHTML = '<div class="empty">Chưa tải file nào qua extension.</div>';
     return;
@@ -167,7 +194,23 @@ const POLL_MS = 1000;
 const timer = setInterval(() => void renderTasks(), POLL_MS);
 window.addEventListener('pagehide', () => clearInterval(timer));
 
+/**
+ * Hiện ngay dữ liệu lần trước trong lúc chờ backend (D1, spec §4.1).
+ *
+ * Popup sống vài giây, nên một round-trip trắng màn hình chiếm phần lớn thời
+ * gian người dùng nhìn nó. Cache không phải nguồn sự thật — nó chỉ lấp chỗ
+ * trống, và bị thay ngay khi dữ liệu thật về.
+ */
+async function seedFromCache(): Promise<void> {
+  const [tasks, history] = await Promise.all([readCachedTasks(), readCachedHistory()]);
+  // Kiểm lại cờ SAU khi await: request thật có thể đã về xong trong lúc đọc
+  // storage, và bản cache tới sau không được ghi đè dữ liệu mới hơn.
+  if (!paintedLive && tasks.length) paintTasks(tasks);
+  if (!paintedLiveHistory && history.length) paintHistory(history);
+}
+
 void (async () => {
+  void seedFromCache();
   await renderStatus();
   await renderTasks();
   await renderCaptures();
