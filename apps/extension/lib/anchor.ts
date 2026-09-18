@@ -116,6 +116,15 @@ export function panelPos(
 
 /** Rời chuột khỏi video bao lâu thì ẩn nút, ms. */
 export const FAB_HIDE_MS = 10_000;
+/**
+ * Thấy con trỏ trong khoảng này thì coi là "đang rê".
+ *
+ * Rộng hơn nhịp mousemove rất nhiều (mousemove bắn hàng chục lần mỗi giây),
+ * nên con trỏ còn trên video là luôn tính đúng; đủ hẹp để buông ra là biết ngay.
+ */
+export const HOVER_FRESH_MS = 400;
+/** Nhịp kiểm lại khi nút đang hiện — để ẩn đúng hạn kể cả khi hết sự kiện chuột. */
+export const HOVER_TICK_MS = 1_000;
 
 /**
  * Nút có được ẩn không.

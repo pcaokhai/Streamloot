@@ -309,3 +309,28 @@ giờ trở lại, kể cả khi rê chuột đúng vào video (2026-09-18).
 **Bài học.** Cùng họ với các bug trước trong nhánh này: ép một trạng thái mà ta
 chỉ *giả định*, thay vì đo cái đang có thật. Ở đây có hai lớp — một tham chiếu
 DOM đã chết vẫn trả lời như thật, và một sự kiện chuột được bịa ra.
+
+## Bug 15. Nút nổi không tự ẩn sau 10s; panel không đóng khi bấm ra ngoài
+
+**Triệu chứng.** Chuột rời hẳn video nhưng nút vẫn nằm đó mãi. Panel mở rồi
+bấm ra vùng ngoài cũng không đóng (2026-09-18).
+
+**Nguyên nhân (nút).** Dò hover theo CẠNH: `mousemove` suy ra "vào" và "ra".
+Con trỏ rời video sang một `<iframe>` (quảng cáo, hoặc chính khung player) thì
+document gốc **ngừng nhận `mousemove`** — không có sự kiện "ra" nào cả, nên cờ
+`hovering` đóng băng ở `true` và bộ hẹn giờ ẩn không bao giờ được đặt.
+
+**Sửa.** Chuyển sang đo MỨC: ghi `lastOverAt` mỗi lần thấy con trỏ trên video,
+rồi một nhịp `setInterval` 1s tính `Date.now() - lastOverAt`. Không cần sự kiện
+"ra" nữa — mốc tự cũ đi. Nhịp chỉ chạy khi nút đang hiện. `HOVER_FRESH_MS`
+(400ms) rộng hơn nhịp mousemove rất nhiều nên "đang rê" luôn đúng.
+
+**Nguyên nhân (panel).** Chưa hề có listener đóng-khi-bấm-ra-ngoài.
+
+**Sửa.** Listener `click` ở document (capture) dùng `composedPath()`: panel sống
+trong shadow root nên `event.target` ở document chỉ là phần tử host, không phân
+biệt được trong/ngoài; `composedPath()` xuyên shadow boundary.
+
+**Bài học.** Dò trạng thái theo cạnh thì phụ thuộc vào việc sự kiện "kết thúc"
+chắc chắn tới. Ở web nó thường KHÔNG tới: iframe nuốt chuột, tab bị ẩn, trang
+điều hướng. Đo mức (mốc thời gian + nhịp kiểm) thì tự phục hồi.

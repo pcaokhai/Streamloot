@@ -15,7 +15,7 @@
 import './style.css';
 import type { Capture, FormatOption, VideoInfoPayload } from '../../lib/types';
 import { pickCapture } from '../../lib/pick';
-import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, FAB_HIDE_MS } from '../../lib/anchor';
+import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, HOVER_FRESH_MS, HOVER_TICK_MS } from '../../lib/anchor';
 import { groupFormats } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
@@ -150,26 +150,43 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     // Nút chỉ hiện khi rê chuột vào video, nán lại FAB_HIDE_MS rồi ẩn — như
     // thanh nút của Cốc Cốc. Quyết định ẩn/hiện nằm ở shouldHideFab (có test);
     // ở đây chỉ là nối sự kiện chuột và một bộ hẹn giờ.
-    let hovering = false;
-    let leftAt = 0; // 0 = chưa từng rê vào -> coi như rời từ lâu -> ẩn
-    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    /**
+     * Lần cuối THẤY con trỏ trên video, chứ không phải cờ "đang rê".
+     *
+     * Bản trước dò theo cạnh lên/xuống (vào -> hiện, ra -> hẹn giờ ẩn) và hỏng
+     * ở một ca rất thường: con trỏ rời video sang một <iframe> (quảng cáo, hoặc
+     * chính khung player) thì document gốc NGỪNG nhận mousemove — không có sự
+     * kiện "ra" nào cả, nên cờ đóng băng ở true và nút không bao giờ ẩn.
+     *
+     * Đo mức thì không cần sự kiện "ra": mốc thời gian tự cũ đi, và một nhịp
+     * kiểm tra định kỳ đủ để nút biến mất đúng hạn kể cả khi không còn sự kiện
+     * chuột nào nữa.
+     */
+    let lastOverAt = 0;
+    let hoverTick: ReturnType<typeof setInterval> | undefined;
 
     function applyFabVisibility(): void {
-      fab.classList.toggle('sl-hidden', shouldHideFab({
-        hovering,
+      const msSinceLeave = Date.now() - lastOverAt;
+      const hide = shouldHideFab({
+        // "Đang rê" = vừa mới thấy con trỏ ở đó. Mousemove bắn dày hơn nhiều so
+        // với ngưỡng này, nên chỉ cần con trỏ còn trên video là luôn đúng.
+        hovering: msSinceLeave < HOVER_FRESH_MS,
         panelOpen: mounted,
         anchored: anchored !== null,
-        msSinceLeave: Date.now() - leftAt,
-      }));
-    }
-    function setHover(on: boolean): void {
-      hovering = on;
-      clearTimeout(hideTimer);
-      if (!on) {
-        leftAt = Date.now();
-        // +20ms để lúc hẹn giờ nổ, msSinceLeave đã chắc chắn >= FAB_HIDE_MS.
-        hideTimer = setTimeout(applyFabVisibility, FAB_HIDE_MS + 20);
+        msSinceLeave,
+      });
+      fab.classList.toggle('sl-hidden', hide);
+      // Chỉ chạy nhịp kiểm khi nút đang hiện: ẩn rồi thì chỉ mousemove mới đánh
+      // thức, không cần bộ đếm chạy không.
+      if (hide && hoverTick !== undefined) {
+        clearInterval(hoverTick);
+        hoverTick = undefined;
+      } else if (!hide && hoverTick === undefined) {
+        hoverTick = setInterval(applyFabVisibility, HOVER_TICK_MS);
       }
+    }
+    function markOver(): void {
+      lastOverAt = Date.now();
       applyFabVisibility();
     }
     /**
@@ -204,15 +221,29 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         if (!fab.classList.contains('sl-hidden')) rects.push(fab.getBoundingClientRect());
         // Vùng đệm bằng cả nút + lề: nút nằm NGOÀI mép trên video, nên đường đi
         // từ video lên tới nút không được tính là "đã rời video".
-        const over = isOverRect({ x, y }, rects, BTN_SIZE + BTN_PAD);
-        if (over !== hovering) setHover(over);
+        if (isOverRect({ x, y }, rects, BTN_SIZE + BTN_PAD)) markOver();
+        else applyFabVisibility();
       });
     }
-    const onDocLeave = () => setHover(false);
     document.addEventListener('mousemove', onMove, { passive: true, capture: true });
-    // Chuột ra khỏi hẳn cửa sổ thì mousemove không bắn nữa — bắt riêng, nếu
-    // không nút sẽ đứng nguyên trạng thái "đang rê" mãi.
-    document.addEventListener('mouseleave', onDocLeave, { passive: true });
+
+    /**
+     * Bấm ra ngoài thì đóng panel — thói quen chung của mọi popover.
+     *
+     * Dùng composedPath(): panel sống trong shadow root, nên `event.target` ở
+     * document chỉ là phần tử host, không phân biệt được bấm trong hay ngoài.
+     * composedPath() xuyên qua shadow boundary và cho biết chính xác.
+     */
+    const onDocClick = (ev: MouseEvent) => {
+      if (!mounted) return;
+      const root = ui.shadow.querySelector('.sl-panel');
+      const path = ev.composedPath();
+      if ((root && path.includes(root)) || path.includes(fab)) return;
+      mounted = false;
+      if (root instanceof HTMLElement) root.style.display = 'none';
+      applyFabVisibility();
+    };
+    document.addEventListener('click', onDocClick, true);
 
     /** Đo lại và đặt nút. Gọi từ observer, không từ bộ đếm. */
     function place(): void {
@@ -289,8 +320,8 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       window.removeEventListener('resize', onScroll);
       document.removeEventListener('fullscreenchange', onScroll, true);
       document.removeEventListener('mousemove', onMove, true);
-      document.removeEventListener('mouseleave', onDocLeave);
-      clearTimeout(hideTimer);
+      document.removeEventListener('click', onDocClick, true);
+      clearInterval(hoverTick);
     });
 
     // Mount ngay để nút nổi lên trang — không có cách nào bấm mở panel lần
@@ -371,9 +402,8 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         // (nó sống chung shadow host với panel), mà nút phải còn đó để mở lại.
         mounted = false;
         root.style.display = 'none';
-        // KHÔNG gọi setHover(false): con trỏ vẫn đang ở trên video, nói dối là
-        // nó đã rời đi sẽ hẹn giờ ẩn nút trong khi người dùng vẫn đang trỏ vào.
-        // Cứ để lần mousemove tới quyết định theo vị trí thật.
+        // Không ép trạng thái rê chuột: con trỏ vẫn đang ở trên video. Mốc
+        // lastOverAt quyết định, và nó chỉ cũ đi khi con trỏ thật sự rời đi.
         applyFabVisibility();
       };
       head.append(logo, title, close);

@@ -1,4 +1,4 @@
-import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX, PANEL_W, PANEL_GAP, FAB_HIDE_MS } from '../.tmp-anchor.mjs';
+import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX, PANEL_W, PANEL_GAP, FAB_HIDE_MS, HOVER_FRESH_MS, HOVER_TICK_MS } from '../.tmp-anchor.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -83,6 +83,16 @@ t('không có vùng nào thì luôn false', () => isOverRect({ x: 1, y: 1 }, [])
 t('rect của node đã rời DOM không dùng được', () => isUsableRect({ top: 0, left: 0, width: 0, height: 0 }), false);
 t('rect thật thì dùng được', () => isUsableRect({ top: 10, left: 10, width: 640, height: 360 }), true);
 t('cao bằng 0 cũng không dùng được', () => isUsableRect({ top: 0, left: 0, width: 640, height: 0 }), false);
+
+// --- đo MỨC, không đo cạnh: con trỏ sang iframe thì hết mousemove, mốc tự cũ đi ---
+const lvl = (ms) => shouldHideFab({
+  hovering: ms < HOVER_FRESH_MS, panelOpen: false, anchored: true, msSinceLeave: ms,
+});
+t('vừa thấy con trỏ thì hiện', () => lvl(0), false);
+t('mới rời chưa lâu thì vẫn hiện', () => lvl(FAB_HIDE_MS - 1), false);
+t('quá hạn thì ẩn dù không có sự kiện chuột nào nữa', () => lvl(FAB_HIDE_MS), true);
+t('ngưỡng tươi hẹp hơn hạn ẩn rất nhiều', () => HOVER_FRESH_MS < FAB_HIDE_MS, true);
+t('nhịp kiểm đủ dày để ẩn không trễ quá một giây', () => HOVER_TICK_MS <= 1000, true);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
