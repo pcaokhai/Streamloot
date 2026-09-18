@@ -411,8 +411,11 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
           setPending(false);
           return;
         }
+        // Chỉ ẩn, không ui.remove() — remove() gỡ luôn nút nổi khỏi trang (nó
+        // sống chung shadow host với panel, như nút ✕ ở trên đã xử lý đúng).
         mounted = false;
-        ui.remove();
+        setPending(false); // mở lại panel lần sau phải bấm được ngay, không kẹt
+        root.style.display = 'none';
       }
 
       // Nạp danh sách chất lượng ngay — người dùng chọn TRƯỚC khi bàn giao, đúng
