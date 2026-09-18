@@ -165,20 +165,6 @@ export function getTask(taskId: string): Promise<TaskRecord> {
 }
 
 /**
- * URL này có plugin riêng xử lý không?
- *
- * Quyết định extension đi đường nào: có plugin thì manifest bắt được là đường
- * đúng (plugin làm việc riêng của site mà hỏi yt-dlp bằng URL trang sẽ mất);
- * không có plugin thì hỏi thẳng yt-dlp cho ra nhiều chất lượng hơn.
- *
- * Backend chỉ trả boolean cho đúng URL đang mở — không có danh sách tên miền
- * nào đi qua đây.
- */
-export function hasPlugin(url: string): Promise<{ plugin: boolean }> {
-  return get<{ plugin: boolean }>(`/extractor?url=${encodeURIComponent(url)}`);
-}
-
-/**
  * Hỏi yt-dlp xem trang này có tải được không, và có những chất lượng nào.
  *
  * Khác `listFormats`: cái kia nhận VideoInfo đã dựng sẵn từ manifest extension

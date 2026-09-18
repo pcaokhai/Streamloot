@@ -19,6 +19,7 @@ import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRec
 import { groupFormats } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
+import { extractPlayerResponse, formatsFromPlayerResponse } from '../../lib/youtube';
 
 /**
  * Panel KHÔNG gọi HTTP trực tiếp.
@@ -113,13 +114,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     let mounted = false;
     // URL người dùng tự chọn trong danh sách stream — null là để hệ thống tự chọn.
     let chosenUrl: string | null = null;
-    /**
-     * Site này có plugin riêng không. `null` = chưa hỏi xong.
-     *
-     * Chưa biết thì coi như CÓ: giữ đường manifest vốn đã chạy, thay vì nhảy
-     * sang yt-dlp rồi lại phải vẽ lại khi câu trả lời về.
-     */
-    let sitePlugin: boolean | null = null;
 
     const ui = await createShadowRootUi(ctx, {
       name: 'streamloot-panel',
@@ -355,6 +349,23 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
 
 
 
+    /**
+     * Danh sách chất lượng đọc thẳng từ HTML trang (hiện chỉ YouTube).
+     *
+     * Rẻ đến mức không cần điều kiện theo tên miền: không thấy dữ liệu thì trả
+     * rỗng và người gọi đi đường cũ. Gắn theo tên miền sẽ là đưa danh sách site
+     * vào code, mà đó đúng thứ CLAUDE.md §3.1 cấm.
+     */
+    function formatsFromPage(): FormatOption[] {
+      try {
+        const pr = extractPlayerResponse(document.documentElement.innerHTML);
+        return pr ? formatsFromPlayerResponse(pr) : [];
+      } catch (err) {
+        console.warn('[Streamloot] đọc danh sách từ trang hỏng:', err);
+        return [];
+      }
+    }
+
     function render(root: HTMLElement) {
       const cap = pickCapture(captures, {
         pageHost: location.hostname,
@@ -375,14 +386,18 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         '| thời lượng <video>:', pageDuration(),
         '| chọn:', cap?.host,
       );
-      // Không bắt được manifest nào không còn nghĩa là bó tay: trang vẫn có thể
-      // tải được qua yt-dlp (YouTube chẳng hạn, vốn không dùng manifest file).
-      // Lúc đó panel chuyển sang hỏi thẳng backend bằng URL trang.
-      // Đi đường yt-dlp khi KHÔNG bắt được manifest, HOẶC khi site không có
-      // plugin riêng. Site có plugin thì manifest là đường đúng: plugin làm
-      // những việc riêng của site (gỡ nguỵ trang segment, header, cookie) mà
-      // hỏi yt-dlp bằng URL trang sẽ mất sạch.
-      const byUrl = !cap || sitePlugin === false;
+      // Bắt được manifest thì ĐI ĐƯỜNG MANIFEST, kể cả site không có plugin.
+      //
+      // Trước đây site không plugin bị đẩy sang hỏi yt-dlp bằng URL trang, tức
+      // chờ backend spawn tiến trình rồi tự tải lại đúng cái manifest ta đã có
+      // trong tay. Giờ service worker đọc thẳng manifest đó (declarativeNetRequest
+      // đặt hộ Referer), nên đường này vừa nhanh hơn vừa không đòi app phải chạy.
+      // Đọc không ra thì nhánh `!r.ok` bên dưới vẫn để lại một dòng cho backend
+      // tự chọn, nên không mất đường lùi.
+      //
+      // Không bắt được manifest nào mới đi đường yt-dlp: trang vẫn tải được
+      // (YouTube chẳng hạn, vốn không dùng manifest file).
+      const byUrl = !cap;
       if (byUrl && !hasVideo()) return;
 
       root.innerHTML = '';
@@ -513,7 +528,13 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // cách IDM và Cốc Cốc làm (ADR 0005 §2.5d).
       const payload = cap ? toPayload(cap) : null;
       say(byUrl ? 'Đang hỏi yt-dlp xem trang này tải được không…' : 'Đang lấy danh sách chất lượng…');
-      const askFormats = byUrl
+      // YouTube nhúng sẵn danh sách chất lượng vào chính HTML trang — đọc được
+      // ngay, không request nào cả. Tải thì vẫn giao cho backend (yt-dlp lo phần
+      // giải chữ ký), nên đây thuần tuý là rút ngắn phần CHỜ.
+      const fromPage = byUrl ? formatsFromPage() : [];
+      const askFormats = fromPage.length
+        ? Promise.resolve({ ok: true as const, formats: fromPage })
+        : byUrl
         ? ask<{ ok: boolean; formats?: FormatOption[]; error?: string }>({
             type: 'formatsByUrl',
             url: location.href,
@@ -613,23 +634,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     window.addEventListener('pagehide', () => {
       void browser.runtime.sendMessage({ type: 'viewerClosed' }).catch(() => {});
     });
-
-    // Hỏi một lần: site này có plugin riêng không. Quyết định panel đi đường
-    // manifest hay đường yt-dlp, nên hỏi ngay chứ không đợi người dùng.
-    void ask<{ plugin: boolean }>({ type: 'sitePlugin', url: location.href })
-      .then((r) => {
-        const changed = sitePlugin !== r.plugin;
-        sitePlugin = r.plugin;
-        // Vẽ lại chỉ khi câu trả lời ĐỔI quyết định — panel không theo dõi tiến
-        // trình nữa nên không còn gì để giữ nguyên khi đang tải.
-        if (changed && mounted) {
-          const root = ui.shadow.querySelector('.sl-panel');
-          if (root instanceof HTMLElement) render(root);
-        }
-      })
-      .catch(() => {
-        sitePlugin = true; // không hỏi được thì giữ đường manifest
-      });
 
     // Video thường nạp SAU khi content script chạy (SPA, lazy player), nên một
     // lần kiểm lúc khởi động là hụt. Nghe sự kiện thay vì poll: rẻ hơn và bắt

@@ -190,10 +190,6 @@ export default defineBackground(() => {
         .catch((e: unknown) => ({ ok: false as const, error: errorText(e) }));
     }
 
-    if (m?.type === 'sitePlugin' && typeof m.url === 'string') {
-      return siteHasPlugin(m.url).then((plugin) => ({ plugin }));
-    }
-
     if (m?.type === 'formatsByUrl' && typeof m.url === 'string') {
       return formatsByUrl(m.url);
     }
@@ -237,34 +233,6 @@ export default defineBackground(() => {
    */
   const formatCache = new Map<string, { ok: boolean; title?: string; formats?: unknown; error?: string }>();
   const FORMAT_CACHE_MAX = 40;
-
-  /**
-   * Nhớ "site này có plugin không" theo HOST, không theo URL đầy đủ.
-   *
-   * Plugin khớp theo tên miền nên mọi trang cùng host cho cùng câu trả lời —
-   * đệm theo URL sẽ hỏi lại vô ích ở mỗi video.
-   */
-  const pluginCache = new Map<string, boolean>();
-
-  async function siteHasPlugin(url: string): Promise<boolean> {
-    let host: string;
-    try {
-      host = new URL(url).host;
-    } catch {
-      return false;
-    }
-    const hit = pluginCache.get(host);
-    if (hit !== undefined) return hit;
-    try {
-      const { plugin } = await api.hasPlugin(url);
-      pluginCache.set(host, plugin);
-      return plugin;
-    } catch {
-      // Không hỏi được thì coi như CÓ plugin: giữ nguyên đường manifest vốn đã
-      // chạy, thay vì đẩy sang đường yt-dlp chưa chắc tốt hơn.
-      return true;
-    }
-  }
 
   /**
  * Đọc master m3u8 NGAY TRONG extension.

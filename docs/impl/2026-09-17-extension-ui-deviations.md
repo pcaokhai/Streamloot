@@ -143,3 +143,37 @@ thật thì đưa lại dưới dạng một dòng phụ, không phải dropdown
 Media playlist (không có biến thể) giờ trả MỘT dòng đọc thẳng từ manifest thay
 vì lùi về backend: backend cũng chỉ trả đúng một lựa chọn cho luồng đó, mà lại
 bắt đợi yt-dlp và đòi app phải đang chạy.
+
+## 10. Liệt kê chất lượng nhanh cho mọi site: manifest trước, trang trước, backend sau
+
+Ba loại site, ba đường — nhưng chung một nguyên tắc: **lấy thứ đã có trong tay
+trước khi đi hỏi tiến trình khác**.
+
+**Site phục vụ HLS (kể cả không có plugin).** Trước đây `byUrl = !cap ||
+sitePlugin === false`, nên site không plugin bị đẩy sang hỏi yt-dlp bằng URL
+trang — tức chờ backend spawn tiến trình rồi tự tải lại đúng cái manifest
+extension đã bắt được. Giờ `byUrl = !cap`: có manifest thì đọc thẳng manifest
+(§8). Hệ quả: `sitePlugin` không còn ai đọc, đã gỡ cả vòng hỏi lẫn
+`siteHasPlugin`/`pluginCache`/`api.hasPlugin`. Endpoint `/api/v1/extractor`
+GIỮ NGUYÊN — nó có test riêng và không lộ gì ngoài một boolean.
+
+**YouTube.** Trang nhúng sẵn `ytInitialPlayerResponse` với đủ itag, nhãn chất
+lượng, dung lượng. `lib/youtube.ts` cắt khối JSON đó ra bằng cách đếm ngoặc
+(regex tham lam sẽ nuốt sang cuối trang) và đổi sang `FormatOption`.
+
+Quan trọng: **KHÔNG giải chữ ký** (`signatureCipher`/`nsig`). Bản tham chiếu
+làm việc đó bằng cách trích hàm giải mã từ player JS của YouTube — hàng nghìn
+dòng phải chạy theo mỗi lần YouTube xoay player. Ta không cần: chữ ký chỉ cần
+để TẢI, mà tải thì yt-dlp ở backend đã lo. Ở đây chỉ cần đủ để VẼ danh sách.
+
+Cũng quan trọng: luồng hình của YouTube là hình KHÔNG TIẾNG (DASH tách hai
+luồng). Gửi trần itag cho yt-dlp sẽ ra **video câm**. `ytFormatId` ghép
+`<itag>+bestaudio/<itag>` cho luồng hình tách, giữ itag trần cho luồng
+progressive và luồng chỉ-tiếng.
+
+Hàm đọc trang không gắn điều kiện theo tên miền: không thấy dữ liệu thì trả
+rỗng và đi đường cũ. Gắn theo tên miền là đưa danh sách site vào code —
+CLAUDE.md §3.1 cấm.
+
+**Còn lại.** Không manifest, không đọc được từ trang thì vẫn hỏi backend bằng
+URL trang như cũ.
