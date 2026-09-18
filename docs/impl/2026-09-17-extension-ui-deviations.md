@@ -93,7 +93,7 @@ hàng, kẹp trong khung nhìn (`panelPos` trong `lib/anchor.ts`, có test); đ�
 đặt lại mỗi lần `place()` chạy nên bám theo khi cuộn. Không lật panel lên
 trên khi thiếu chỗ — chỉ kẹp để còn lộ 200px, phần dư panel tự cuộn.
 
-## 8. Liệt kê chất lượng đọc thẳng trong extension (declarativeNetRequest)
+## 9. Liệt kê chất lượng đọc thẳng trong extension (declarativeNetRequest)
 
 Spec §4.2 giả định mọi lời gọi mạng đều đi qua backend. Đo thật cho thấy đường
 đó chậm: backend phải spawn `yt-dlp -J` (riêng khởi động ~0.38s, chưa kể nó tự
@@ -122,7 +122,7 @@ Chưa áp dụng, ghi lại để cân nhắc: họ dùng `offscreen` (reason `W
 chạy Web Worker vì service worker MV3 không spawn được worker — mình không cần,
 việc tải nặng đã nằm ở backend Python.
 
-## 9. Panel bỏ ô chọn stream; luồng đơn không cần backend
+## 10. Panel bỏ ô chọn stream; luồng đơn không cần backend
 
 Thử tay 2026-09-18: panel treo vĩnh viễn ở "Đang lấy danh sách chất lượng…".
 Nguyên nhân không phải chậm — `askFormats.then(...)` thiếu `.catch()`, nên khi
@@ -144,7 +144,7 @@ Media playlist (không có biến thể) giờ trả MỘT dòng đọc thẳng 
 vì lùi về backend: backend cũng chỉ trả đúng một lựa chọn cho luồng đó, mà lại
 bắt đợi yt-dlp và đòi app phải đang chạy.
 
-## 10. Liệt kê chất lượng nhanh cho mọi site: manifest trước, trang trước, backend sau
+## 11. Liệt kê chất lượng nhanh cho mọi site: manifest trước, trang trước, backend sau
 
 Ba loại site, ba đường — nhưng chung một nguyên tắc: **lấy thứ đã có trong tay
 trước khi đi hỏi tiến trình khác**.

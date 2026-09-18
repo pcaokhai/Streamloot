@@ -1,5 +1,9 @@
 # Nhật ký sửa lỗi — vòng thử tay ngày 17/09/2026
 
+> Hồi cứu kèm quá trình gỡ, quyết định và đánh đổi:
+> [2026-09-19-debug-retrospective.md](2026-09-19-debug-retrospective.md).
+> File này là nhật ký theo từng lỗi; file kia xếp chúng theo nguyên nhân gốc.
+
 Ghi lại 12 lỗi tìm ra khi thử tay bản `.app` và extension, sau khi Plan 1 đã
 xong và qua review toàn nhánh. Mỗi mục ghi: triệu chứng người dùng thấy, nguyên
 nhân **đo được**, bản vá, và bài học.
@@ -286,7 +290,7 @@ thread. `window.show()` giữ nguyên — nó chỉ `callAfter`, không đợi.
 `create_file_dialog`, `get_current_url`) đều đợi main thread — không bao giờ
 gọi từ selector AppKit. Tìm bằng `grep -n "semaphore.acquire" platforms/cocoa.py`.
 
-## Bug 14. Bắt đầu tải xong thì nút nổi mất hẳn, rê chuột vào video không hiện lại
+## Bug 15. Bắt đầu tải xong thì nút nổi mất hẳn, rê chuột vào video không hiện lại
 
 **Triệu chứng.** Chọn format → app bắt đầu tải → nút nổi biến mất và không bao
 giờ trở lại, kể cả khi rê chuột đúng vào video (2026-09-18).
@@ -310,7 +314,7 @@ giờ trở lại, kể cả khi rê chuột đúng vào video (2026-09-18).
 chỉ *giả định*, thay vì đo cái đang có thật. Ở đây có hai lớp — một tham chiếu
 DOM đã chết vẫn trả lời như thật, và một sự kiện chuột được bịa ra.
 
-## Bug 15. Nút nổi không tự ẩn sau 10s; panel không đóng khi bấm ra ngoài
+## Bug 16. Nút nổi không tự ẩn sau 10s; panel không đóng khi bấm ra ngoài
 
 **Triệu chứng.** Chuột rời hẳn video nhưng nút vẫn nằm đó mãi. Panel mở rồi
 bấm ra vùng ngoài cũng không đóng (2026-09-18).
@@ -335,7 +339,7 @@ biệt được trong/ngoài; `composedPath()` xuyên shadow boundary.
 chắc chắn tới. Ở web nó thường KHÔNG tới: iframe nuốt chuột, tab bị ẩn, trang
 điều hướng. Đo mức (mốc thời gian + nhịp kiểm) thì tự phục hồi.
 
-## Bug 16. "Hiện trong Finder" báo không tìm thấy file
+## Bug 17. "Hiện trong Finder" báo không tìm thấy file
 
 **Triệu chứng.** Tải xong, bấm Show in Finder → "File not found on disk".
 
@@ -348,7 +352,7 @@ line or "Downloading webpage" in line:`. Nghĩa là dòng `[download] Destinatio
 **Sửa.** Đưa khối ra đúng cấp, và tách thành `_path_from_line()` để TEST ĐƯỢC —
 lỗi này im lặng suốt vì không test nào chạm tới nó. 6 test, có kiểm ngược.
 
-## Bug 17. File tải về thiếu tiếng (hoặc thiếu hình)
+## Bug 18. File tải về thiếu tiếng (hoặc thiếu hình)
 
 **Triệu chứng.** Hai video trên cùng một site tin tức: một cái tải về chỉ có
 tiếng, một cái chỉ có hình. YouTube và một site khác thì bình thường.
