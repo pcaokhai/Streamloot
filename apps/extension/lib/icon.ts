@@ -18,6 +18,8 @@ const RING_BLUE = '#2563eb';
 // khớp màu xám tạm-dừng/chờ trong popup, còn BADGE_GRAY là màu rảnh của badge
 // — hai ngữ cảnh khác nhau, đừng gộp làm một hằng số.
 const RING_GRAY = '#a1a1aa';
+/** Đường ray mờ chạy hết vòng — cho biết "đang tải" kể cả khi mới 0%. */
+const RING_TRACK = 'rgba(148, 163, 184, 0.45)';
 
 /** Khoá lần vẽ gần nhất. Trùng khoá thì bỏ qua — đây là chốt chặn vẽ thừa. */
 let lastKey: string | null = null;
@@ -65,13 +67,28 @@ export async function applyIconState(tasks: TaskRecord[], tabId?: number): Promi
       const inset = RING_W + 1;
       ctx.drawImage(bmp, inset, inset, SIZE - inset * 2, SIZE - inset * 2);
       const pct = quantize5(task.progress);
+      const r = SIZE / 2 - RING_W / 2;
+      const TOP = -Math.PI / 2; // 12 giờ, như mọi vòng tiến trình khác
+
+      // ĐƯỜNG RAY trước, rồi mới tới cung tiến trình.
+      //
+      // Không có ray thì lúc mới bắt đầu nhìn y hệt như chưa chạy: quantize5
+      // làm tròn xuống bội số 5, nên 2% thành 0% và cung dài đúng 0 độ. Ngay cả
+      // 5% cũng chỉ là một chấm trên icon 16px. Ray cho biết "đang tải" ngay từ
+      // giây đầu, còn cung cho biết tới đâu.
       ctx.lineWidth = RING_W;
+      ctx.lineCap = 'butt';
+      ctx.strokeStyle = RING_TRACK;
+      ctx.beginPath();
+      ctx.arc(SIZE / 2, SIZE / 2, r, 0, 2 * Math.PI);
+      ctx.stroke();
+
       ctx.strokeStyle = task.status === 'paused' ? RING_GRAY : RING_BLUE;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      // Bắt đầu từ 12 giờ (-90°) cho giống mọi vòng tiến trình khác.
-      ctx.arc(SIZE / 2, SIZE / 2, SIZE / 2 - RING_W / 2,
-              -Math.PI / 2, -Math.PI / 2 + (pct / 100) * 2 * Math.PI);
+      // Cung tối thiểu ~4% để 0% vẫn thấy được là đã bắt đầu, thay vì trống trơn.
+      const frac = Math.max(0.04, pct / 100);
+      ctx.arc(SIZE / 2, SIZE / 2, r, TOP, TOP + frac * 2 * Math.PI);
       ctx.stroke();
     }
 

@@ -31,7 +31,18 @@ export default defineConfig({
       128: 'icon/128.png',
     },
 
-    action: { default_title: 'Streamloot' },
+    // default_icon khai tường minh: setIcon lúc chạy ghi đè lên nó để vẽ vòng
+    // tiến trình. Thiếu khai báo thì Chrome mượn tạm `icons`, và trạng thái
+    // "icon trần" lúc rảnh phụ thuộc vào cách mượn đó thay vì vào thứ ta khai.
+    action: {
+      default_title: 'Streamloot',
+      default_icon: {
+        16: 'icon/16.png',
+        32: 'icon/32.png',
+        48: 'icon/48.png',
+        128: 'icon/128.png',
+      },
+    },
     options_ui: { open_in_tab: true },
   },
 });
