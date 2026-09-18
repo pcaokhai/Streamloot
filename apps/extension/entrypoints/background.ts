@@ -13,12 +13,28 @@
  */
 import * as api from '../lib/api';
 import { BackendError } from '../lib/api';
-import type { Capture, VideoInfoPayload } from '../lib/types';
+import { applyIconState, flashCompleted } from '../lib/icon';
+import { cacheTasks } from '../lib/cache';
+import { nextPollMs, pickRingTask, shouldCacheFormatFailure } from '../lib/tasks';
+import type { Capture, TaskRecord, VideoInfoPayload } from '../lib/types';
 
 const MANIFEST_URL = /\.(m3u8|mpd)(\?|$)/i;
 const MANIFEST_TYPE = /(mpegurl|dash\+xml)/i;
 
 const keyFor = (tabId: number) => `captures:${tabId}`;
+
+/**
+ * Ảnh chụp task gần nhất từ backend.
+ *
+ * Extension không phải nguồn sự thật (spec §4.1) — biến này chỉ để vẽ icon mà
+ * không phải gọi mạng. Service worker chết thì nó về rỗng, và lần poll kế tiếp
+ * dựng lại đầy đủ.
+ */
+let lastKnownTasks: TaskRecord[] = [];
+
+function setLastKnownTasks(tasks: TaskRecord[]): void {
+  lastKnownTasks = tasks;
+}
 
 /** Trần mỗi tab: một trang có thể nạp nhiều biến thể playlist. */
 const MAX_PER_TAB = 12;
@@ -35,11 +51,9 @@ async function addCapture(tabId: number, cap: Capture): Promise<void> {
   const next = [...existing, cap].slice(-MAX_PER_TAB);
   await browser.storage.session.set({ [keyFor(tabId)]: next });
 
-  // B8 — badge cho biết ngay trang này bắt được mấy stream, không bắt người dùng
-  // đi tìm. Đây là khác biệt giữa "công cụ tôi phải nhớ là mình có" và "công cụ
-  // luôn ở đó" (R5 trong ADR 0005).
-  await browser.action.setBadgeText({ tabId, text: String(next.length) }).catch(() => {});
-  await browser.action.setBadgeBackgroundColor({ tabId, color: '#2563eb' }).catch(() => {});
+  // Badge và vòng do applyIconState quyết (lib/tasks.ts), không đặt tay ở đây
+  // nữa — hai chỗ cùng đặt badge là hai chỗ sẽ lệch nhau.
+  await applyIconState(lastKnownTasks, tabId);
 
   // Báo content script để panel tự nổi lên.
   browser.tabs.sendMessage(tabId, { type: 'captures', captures: next }).catch(() => {
@@ -65,22 +79,6 @@ async function clearTab(tabId: number): Promise<void> {
 
 function errorText(e: unknown): string {
   return e instanceof BackendError ? e.message : 'Lỗi không xác định';
-}
-
-/** Đọc stream tiến trình rồi chuyển tiếp về tab đã yêu cầu tải. */
-async function pumpProgress(taskId: string, tabId?: number): Promise<void> {
-  if (tabId === undefined) return;
-  try {
-    await api.streamProgress(taskId, (event) => {
-      browser.tabs.sendMessage(tabId, { type: 'progress', taskId, event }).catch(() => {
-        // Tab đã đóng hoặc điều hướng đi — dừng im lặng, không phải lỗi.
-      });
-    });
-  } catch (e) {
-    browser.tabs
-      .sendMessage(tabId, { type: 'progress', taskId, error: errorText(e) })
-      .catch(() => {});
-  }
 }
 
 /** Origin của frame khởi tạo request — 2/3 site đích phục vụ stream qua iframe. */
@@ -152,6 +150,8 @@ export default defineBackground(() => {
       info?: VideoInfoPayload;
       formatId?: string | null;
       taskId?: string;
+      /** URL trang, cho đường hỏi yt-dlp trực tiếp (formatsByUrl / startByUrl). */
+      url?: string;
     };
 
     if (m?.type === 'getCaptures') {
@@ -176,13 +176,34 @@ export default defineBackground(() => {
     }
 
     if (m?.type === 'startDownload' && m.info) {
-      const tabId = sender.tab?.id;
       return api
         .startDownload(m.info, m.formatId ?? null)
         .then(({ task_id }) => {
-          // Stream ở background rồi đẩy từng sự kiện về tab. Content script
-          // không tự stream được, cùng lý do Origin ở trên.
-          void pumpProgress(task_id, tabId);
+          // Đánh thức vòng poll.
+          //
+          // nextPollMs trả null khi không còn task, nên trước cú tải này vòng
+          // poll đã DỪNG HẲN — và không có gì tự khởi động lại nó. Thiếu dòng
+          // này thì icon không mọc vòng tiến trình cho tới khi người dùng tình
+          // cờ mở popup (viewerOpen mới gọi runTick). Đã gặp thật.
+          runTick();
+          return { ok: true as const, taskId: task_id };
+        })
+        .catch((e: unknown) => ({ ok: false as const, error: errorText(e) }));
+    }
+
+    if (m?.type === 'sitePlugin' && typeof m.url === 'string') {
+      return siteHasPlugin(m.url).then((plugin) => ({ plugin }));
+    }
+
+    if (m?.type === 'formatsByUrl' && typeof m.url === 'string') {
+      return formatsByUrl(m.url);
+    }
+
+    if (m?.type === 'startByUrl' && typeof m.url === 'string') {
+      return api
+        .startDownloadByUrl(m.url, m.formatId ?? null)
+        .then(({ task_id }) => {
+          runTick();
           return { ok: true as const, taskId: task_id };
         })
         .catch((e: unknown) => ({ ok: false as const, error: errorText(e) }));
@@ -192,6 +213,236 @@ export default defineBackground(() => {
       return api.health().then((state) => ({ state }));
     }
 
+    if (m?.type === 'viewerOpen') {
+      viewers += 1;
+      runTick(); // đổi sang nhịp 1s ngay, đừng đợi hết chu kỳ 60s
+      return Promise.resolve({ ok: true });
+    }
+    if (m?.type === 'viewerClosed') {
+      viewers = Math.max(0, viewers - 1);
+      return Promise.resolve({ ok: true });
+    }
     return undefined;
   });
+
+  /**
+   * Nhớ kết quả hỏi yt-dlp theo URL trang.
+   *
+   * Panel hỏi tự động trên MỌI trang có video, nên không có bộ nhớ đệm thì mỗi
+   * lần panel vẽ lại là một lượt gọi ra internet — và trang yt-dlp không hỗ trợ
+   * vẫn tốn nguyên một lượt tải trang rồi mới bỏ cuộc. Nhớ cả lần THẤT BẠI:
+   * "site này không tải được" cũng là một câu trả lời, hỏi lại không đổi.
+   *
+   * Sống trong RAM của service worker, mất khi MV3 thu hồi worker — chấp nhận
+   * được, lúc đó hỏi lại một lần là xong.
+   */
+  const formatCache = new Map<string, { ok: boolean; title?: string; formats?: unknown; error?: string }>();
+  const FORMAT_CACHE_MAX = 40;
+
+  /**
+   * Nhớ "site này có plugin không" theo HOST, không theo URL đầy đủ.
+   *
+   * Plugin khớp theo tên miền nên mọi trang cùng host cho cùng câu trả lời —
+   * đệm theo URL sẽ hỏi lại vô ích ở mỗi video.
+   */
+  const pluginCache = new Map<string, boolean>();
+
+  async function siteHasPlugin(url: string): Promise<boolean> {
+    let host: string;
+    try {
+      host = new URL(url).host;
+    } catch {
+      return false;
+    }
+    const hit = pluginCache.get(host);
+    if (hit !== undefined) return hit;
+    try {
+      const { plugin } = await api.hasPlugin(url);
+      pluginCache.set(host, plugin);
+      return plugin;
+    } catch {
+      // Không hỏi được thì coi như CÓ plugin: giữ nguyên đường manifest vốn đã
+      // chạy, thay vì đẩy sang đường yt-dlp chưa chắc tốt hơn.
+      return true;
+    }
+  }
+
+  async function formatsByUrl(url: string) {
+    const hit = formatCache.get(url);
+    if (hit) return hit;
+    let result;
+    // F2 — chỉ nhớ THẤT BẠI khi backend thực sự đã trả lời (status có giá
+    // trị). App chưa chạy thì lỗi đó không nói gì về trang, không được phép
+    // khoá trang này vĩnh viễn tới khi worker khởi động lại.
+    let cacheable = true;
+    try {
+      const r = await api.getFormatsByUrl(url);
+      result = { ok: true as const, title: r.title, formats: r.formats };
+    } catch (e: unknown) {
+      result = { ok: false as const, error: errorText(e) };
+      cacheable = shouldCacheFormatFailure(e instanceof BackendError ? e.status : undefined);
+    }
+    if (!cacheable) return result;
+    // Trần đơn giản: xoá mục cũ nhất khi đầy. Map giữ thứ tự chèn nên cái đầu
+    // tiên là cái cũ nhất.
+    if (formatCache.size >= FORMAT_CACHE_MAX) {
+      const oldest = formatCache.keys().next().value;
+      if (oldest !== undefined) formatCache.delete(oldest);
+    }
+    formatCache.set(url, result);
+    return result;
+  }
+
+  const ALARM = 'streamloot-poll';
+  /** Số bề mặt đang mở (popup, panel). Quyết định nhịp 1s hay 60s (spec §4.2). */
+  let viewers = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Task mà vòng tiến trình đang bám, để biết lúc nào nó kết thúc.
+   *
+   * `/downloads/active` chỉ trả task chưa xong, nên "biến mất khỏi danh sách"
+   * là tín hiệu duy nhất ta có. Nhưng biến mất vì XONG và biến mất vì bị HUỶ
+   * nhìn giống hệt nhau, nên phải hỏi lại trạng thái cuối — chỉ `completed`
+   * mới đáng cho vòng chạy nốt tới 100% (spec §5.3).
+   */
+  let ringTaskId: string | null = null;
+
+  async function notifyIfRingTaskFinished(tasks: TaskRecord[]): Promise<void> {
+    const previous = ringTaskId;
+    ringTaskId = pickRingTask(tasks)?.task_id ?? null;
+    if (!previous || tasks.some((t) => t.task_id === previous)) return;
+    try {
+      const finished = await api.getTask(previous);
+      if (finished.status === 'completed') await flashCompleted();
+    } catch {
+      // 404 (bản ghi đã bị xoá) hay app vừa tắt: không biết thì không ăn mừng.
+    }
+  }
+
+  /** `null` = KHÔNG HỎI ĐƯỢC (khác hẳn mảng rỗng = hỏi được, và không có task). */
+  async function refreshTasks(): Promise<TaskRecord[] | null> {
+    try {
+      const { tasks } = await api.getActiveTasks();
+      setLastKnownTasks(tasks);
+      // Cache cho popup mở ra hiện ngay (D1). Không await: popup đọc được bản
+      // cũ một nhịp cũng chẳng sao, còn chặn vòng poll vì một lượt ghi storage
+      // thì không đáng.
+      void cacheTasks(tasks);
+      // Hỏi tab đang mở chỉ để gỡ badge theo-tab còn sót từ bản cũ; badge bây
+      // giờ luôn toàn cục nên không cần đếm stream bắt được nữa.
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      await applyIconState(tasks, tab?.id);
+      // Sau applyIconState: nếu vòng vừa mất task của nó, kiểm xem có phải đã
+      // xong để chạy nốt tới 100%.
+      await notifyIfRingTaskFinished(tasks);
+      return tasks;
+    } catch {
+      // App tắt giữa chừng là chuyện bình thường. Không có dữ liệu mới thì
+      // không ghi lastKnownTasks, không vẽ lại icon — trả null để tick() giữ
+      // nguyên hiểu biết cũ thay vì kết luận nhầm là đã hết task.
+      return null;
+    }
+  }
+
+  /**
+   * Đặt lịch lần poll kế tiếp.
+   *
+   * Hai cơ chế, cố ý: `setTimeout` cho nhịp 1s khi có người xem (chính xác, và
+   * lúc đó đã có tin nhắn giữ service worker sống), `chrome.alarms` cho nhịp 60s
+   * (setTimeout dài không sống nổi qua lần MV3 thu hồi worker). Hết task thì
+   * DỪNG cả hai — poll rỗng chính là cách giữ worker sống mà D4 loại bỏ.
+   */
+  /**
+   * `browser.alarms` có thể KHÔNG tồn tại.
+   *
+   * Quyền `alarms` chỉ có hiệu lực sau khi Reload extension; bản đang chạy được
+   * nạp trước lúc thêm quyền sẽ thấy `chrome.alarms === undefined`. Trước đây
+   * mọi nhánh của schedule() đều chạm thẳng vào nó, nên một quyền thiếu ném lỗi
+   * ngay lần gọi đầu — mà schedule() được gọi trong tick(), vốn trước đây chạy
+   * qua `void tick()` nên lỗi bị nuốt
+   * và CẢ vòng poll chết lặng: badge đứng yên, vòng tiến trình không bao giờ vẽ,
+   * danh sách task không bao giờ mới. Đã gặp thật.
+   *
+   * Thiếu thì kêu to một lần rồi chạy tiếp bằng setTimeout: kém hơn (không sống
+   * qua lần MV3 thu hồi worker) nhưng còn hoạt động, thay vì chết câm.
+   */
+  let alarmsWarned = false;
+  function alarms(): typeof browser.alarms | null {
+    const api = browser.alarms as typeof browser.alarms | undefined;
+    if (api) return api;
+    if (!alarmsWarned) {
+      alarmsWarned = true;
+      console.error(
+        '[Streamloot] Không có chrome.alarms — quyền `alarms` chưa có trong bản đang chạy. ' +
+          'Vào chrome://extensions bấm Reload cho Streamloot. ' +
+          'Tạm thời chỉ còn nhịp ngắn, và nó sẽ chết khi MV3 thu hồi service worker.',
+      );
+    }
+    return null;
+  }
+
+  function schedule(tasks: TaskRecord[]): void {
+    if (timer) { clearTimeout(timer); timer = null; }
+    const ms = nextPollMs({ viewersOpen: viewers > 0, hasActive: tasks.length > 0 });
+    if (ms === null) {
+      void alarms()?.clear(ALARM);
+      return;
+    }
+    // Hợp đồng của nextPollMs chỉ trả 1000 | 60000 | null — so bằng đúng giá trị
+    // ngắn thay vì ngưỡng lỏng (<= 5000) để không âm thầm chấp nhận giá trị lạ.
+    if (ms === 1000) {
+      // KHÔNG clear alarm ở đây. MV3 giết service worker sau 5 phút bất kể có
+      // đang hoạt động hay không — setTimeout chết theo worker, giữ nguyên
+      // alarm 60s làm lưới đỡ: worker hồi sinh, tick() lại chạy. Bắn trùng vô
+      // hại vì tick() tự chặn bằng tickSeq.
+      timer = setTimeout(runTick, ms);
+      void alarms()?.create(ALARM, { periodInMinutes: 1 });
+    } else if (alarms()) {
+      void alarms()!.create(ALARM, { periodInMinutes: ms / 60000 });
+    } else {
+      // Không có alarms: lùi về setTimeout cho cả nhịp dài. Nó chết theo worker,
+      // nhưng thà nhịp kém còn hơn không có nhịp nào.
+      timer = setTimeout(runTick, ms);
+    }
+  }
+
+  let tickSeq = 0;
+
+  /**
+   * Chạy tick mà KHÔNG nuốt lỗi.
+   *
+   * `void tick()` vứt promise đi, nên bất kỳ lỗi nào trong vòng poll — một API
+   * trình duyệt vắng mặt, một thay đổi hình dạng dữ liệu — đều biến mất không
+   * dấu vết và vòng poll chết câm. Ghi lại rồi mới bỏ qua.
+   */
+  function runTick(): void {
+    tick().catch((err) => {
+      console.error('[Streamloot] vòng poll hỏng — sẽ không tự chạy lại cho tới sự kiện kế tiếp:', err);
+    });
+  }
+
+  async function tick(): Promise<void> {
+    const mine = ++tickSeq;
+    const tasks = await refreshTasks();
+    // Tick cũ về muộn thì bỏ qua: nó mang ảnh chụp cũ, mà schedule() chỉ được
+    // nghe theo ảnh chụp mới nhất. Không có chốt này thì một response lạc hậu
+    // ghi đè quyết định đúng và poll dừng giữa lúc đang tải.
+    if (mine !== tickSeq) return;
+    // Không hỏi được thì DỰA VÀO hiểu biết gần nhất, đừng kết luận là hết task.
+    // Kết luận nhầm sẽ dừng poll vĩnh viễn cho tới khi người dùng mở popup —
+    // app restart một nhịp là đủ để mất dấu một download đang chạy.
+    schedule(tasks ?? lastKnownTasks);
+  }
+
+  // F3 — dùng alarms() thay vì browser.alarms trực tiếp: bản đang chạy trước
+  // khi quyền `alarms` được thêm có thể chưa có API này, gọi thẳng ném
+  // TypeError và chặn luôn runTick() khởi động bên dưới.
+  alarms()?.onAlarm.addListener((a) => {
+    if (a.name === ALARM) runTick();
+  });
+
+  // Task có thể đã chạy từ trước lần khởi động này (do app hoặc CLI bắt đầu, hoặc
+  // service worker vừa bị thu hồi) — hỏi backend một phát để dựng lại.
+  runTick();
 });

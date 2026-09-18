@@ -15,14 +15,34 @@ export default defineConfig({
     // CỐ Ý không xin `cookies`: phép đo B14 (ADR 0005 §7.3) cho thấy mọi host
     // phục vụ byte media đều không nhận cookie, nên quyền đó là thừa. Chrome Web
     // Store soi permission rất kỹ, và người dùng cũng vậy.
-    permissions: ['webRequest', 'storage', 'tabs'],
+    // `alarms`: nhịp 60s khi không có bề mặt nào mở (spec §4.2). Không dùng
+    // setInterval trong service worker — MV3 thu hồi worker và bộ đếm chết theo.
+    permissions: ['webRequest', 'storage', 'tabs', 'alarms'],
 
     // Extension phải quan sát được site bất kỳ người dùng mở. Đây là quyền rộng
     // nhất Chrome có — thu hẹp được thì nên thu, nhưng danh sách site không biết
     // trước.
     host_permissions: ['<all_urls>'],
 
-    action: { default_title: 'Streamloot' },
+    icons: {
+      16: 'icon/16.png',
+      32: 'icon/32.png',
+      48: 'icon/48.png',
+      128: 'icon/128.png',
+    },
+
+    // default_icon khai tường minh: setIcon lúc chạy ghi đè lên nó để vẽ vòng
+    // tiến trình. Thiếu khai báo thì Chrome mượn tạm `icons`, và trạng thái
+    // "icon trần" lúc rảnh phụ thuộc vào cách mượn đó thay vì vào thứ ta khai.
+    action: {
+      default_title: 'Streamloot',
+      default_icon: {
+        16: 'icon/16.png',
+        32: 'icon/32.png',
+        48: 'icon/48.png',
+        128: 'icon/128.png',
+      },
+    },
     options_ui: { open_in_tab: true },
   },
 });

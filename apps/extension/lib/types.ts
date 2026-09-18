@@ -28,6 +28,12 @@ export interface FormatOption {
   ext: string;
   resolution: string;
   height: number | null;
+  /** Byte, hoặc `null` khi yt-dlp không biết trước (HLS thường không biết). */
+  filesize: number | null;
+  /** `'none'` nghĩa là luồng này KHÔNG có hình — đó là cách tách âm thanh. */
+  vcodec: string | null;
+  /** `'none'` nghĩa là luồng này không có tiếng. */
+  acodec: string | null;
   recommended: boolean;
 }
 
@@ -72,3 +78,37 @@ export interface Capture {
 }
 
 export const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
+/**
+ * Một task trong bảng `download_tasks` — nguồn sự thật cho "đang tải gì".
+ *
+ * Trùng cột với backend; `tests/test_api_contract.py` giữ hai bên không lệch.
+ * `progress` là phần trăm 0-100.
+ */
+export interface TaskRecord {
+  task_id: string;
+  url: string;
+  title: string | null;
+  status: string;
+  progress: number;
+  output_path: string | null;
+  error_msg: string | null;
+  created_at: string;
+  updated_at: string | null;
+  avg_speed: string | null;
+  source: string;
+}
+
+/** Một dòng trong bảng `download_history` — file đã tải xong. */
+export interface HistoryRow {
+  id: number;
+  title: string;
+  url: string;
+  m3u8_url: string | null;
+  format_id: string | null;
+  status: string;
+  output_path: string | null;
+  playlist_name: string | null;
+  created_at: string;
+  source: string;
+}

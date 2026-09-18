@@ -1,54 +1,221 @@
 import * as api from '../../lib/api';
+import { cacheHistory, readCachedHistory, readCachedTasks } from '../../lib/cache';
 import { loadSettings } from '../../lib/settings';
-import type { Capture } from '../../lib/types';
+import { relativeTime } from '../../lib/tasks';
+import type { Capture, HistoryRow, TaskRecord } from '../../lib/types';
+import { TERMINAL_STATUSES } from '../../lib/types';
 
 const esc = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
-async function render() {
-  const status = document.getElementById('status')!;
-  const hint = document.getElementById('hint')!;
-  const caps = document.getElementById('caps')!;
-  const { port } = await loadSettings();
+const el = (id: string) => document.getElementById(id)!;
+const nameOf = (t: TaskRecord) => t.title || t.url;
 
-  // B6 — ba trạng thái, không phải hai. "App chưa chạy" và "app từ chối" sửa
-  // theo hai cách hoàn toàn khác nhau; gộp lại là chỉ sai đường cho người dùng.
-  // Đo thời gian thật và hiện ra: "kết nối lâu" mà không có con số thì không ai
-  // biết lâu ở đâu — chờ backend, hay chờ chính extension khởi động lại.
+// task_id đang có hành động bay tới backend. Nút của chúng phải luôn mờ, kể cả
+// sau khi danh sách được vẽ lại — nếu không người dùng bấm được lần hai trong
+// khoảng thời gian request còn đang bay.
+const pending = new Set<string>();
+
+// Đếm lượt gọi renderTasks còn hiệu lực. Interval 1s và click handler đều tự
+// gọi renderTasks với fetch riêng, không đảm bảo thứ tự resolve — nếu không
+// chặn, response cũ (bắt đầu trước) có thể về sau và ghi đè trạng thái mới.
+let renderSeq = 0;
+
+/**
+ * Popup gọi thẳng backend, không qua service worker.
+ *
+ * Popup là extension page nên `fetch` mang đúng quyền host (spec §4.2); đi vòng
+ * qua service worker chỉ thêm một chặng có thể chết giữa chừng.
+ */
+/**
+ * Đã vẽ danh sách bằng DỮ LIỆU THẬT chưa.
+ *
+ * Cache chỉ được phép lấp chỗ trống lúc chưa có gì. Nếu request thật về trước
+ * (mạng nhanh hơn đọc storage) thì bản cache tới sau không được ghi đè.
+ */
+let paintedLive = false;
+
+async function renderTasks(): Promise<void> {
+  const mine = ++renderSeq;
+  const box = el('tasks');
+  let tasks: TaskRecord[];
+  try {
+    tasks = (await api.getActiveTasks()).tasks;
+  } catch (err) {
+    // Response cũ về muộn thì bỏ: vẽ nó lên là xoá mất trạng thái người dùng vừa đổi.
+    if (mine !== renderSeq) return;
+    // Còn cache thì giữ danh sách cũ trên màn hình, chỉ báo lỗi bên dưới — xoá
+    // sạch rồi hiện một dòng lỗi là mất luôn thứ người dùng đang nhìn.
+    if (!paintedLive) box.innerHTML = '<div class="empty">Không đọc được danh sách tải.</div>';
+    console.error('Streamloot renderTasks:', err);
+    el('err').textContent = err instanceof Error ? err.message : String(err);
+    return;
+  }
+  if (mine !== renderSeq) return;
+  paintedLive = true;
+  paintTasks(tasks);
+}
+
+function paintTasks(tasks: TaskRecord[]): void {
+  const box = el('tasks');
+  const live = tasks.filter((t) => !TERMINAL_STATUSES.has(t.status));
+  if (!live.length) {
+    box.innerHTML = '<div class="empty">Không có gì đang tải.</div>';
+    return;
+  }
+  box.innerHTML = live.map((t) => {
+    const paused = t.status === 'paused';
+    // 'cancelling' không phải trạng thái cuối (backend chỉ đặt nó rồi chờ tiến
+    // trình chết) nhưng cũng không còn điều khiển được — ✕ lần nữa chỉ ăn 409.
+    const cancelling = t.status === 'cancelling';
+    const pct = Math.round(t.progress);
+    const right = cancelling ? 'Đang huỷ…' : paused ? 'Tạm dừng' : `${pct}%`;
+    const busy = pending.has(t.task_id) || cancelling;
+    return `<div class="task" data-id="${esc(t.task_id)}">
+      <div class="t"><span class="name">${esc(nameOf(t))}</span><span>${right}</span></div>
+      <div class="bar${paused ? ' paused' : ''}"><i style="width:${pct}%"></i></div>
+      <div class="t">
+        <span class="hint">${esc(t.avg_speed ?? '')}</span>
+        <span class="ctl">
+          ${cancelling ? '' : `
+          <button data-act="${paused ? 'resume' : 'pause'}"${busy ? ' disabled' : ''}>${paused ? '▶' : '⏸'}</button>
+          <button data-act="cancel"${busy ? ' disabled' : ''}>✕</button>`}
+        </span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+let paintedLiveHistory = false;
+
+async function renderHistory(): Promise<void> {
+  const box = el('history');
+  let rows: HistoryRow[];
+  try {
+    rows = await api.getHistory('extension');
+    void cacheHistory(rows);
+  } catch (err) {
+    // Giữ bản cache đang hiện nếu có — xoá đi rồi báo lỗi là mất cả hai.
+    if (!paintedLiveHistory) box.innerHTML = '<div class="empty">Không đọc được lịch sử.</div>';
+    console.error('Streamloot renderHistory:', err);
+    el('err').textContent = err instanceof Error ? err.message : String(err);
+    return;
+  }
+  paintedLiveHistory = true;
+  paintHistory(rows);
+}
+
+function paintHistory(rows: HistoryRow[]): void {
+  const box = el('history');
+  if (!rows.length) {
+    box.innerHTML = '<div class="empty">Chưa tải file nào qua extension.</div>';
+    return;
+  }
+  box.innerHTML = '<table>' + rows.map((r) => {
+    const ok = r.status === 'SUCCESS';
+    return `<tr><td>${esc(r.title)}</td><td class="hint">${esc(relativeTime(r.created_at))}</td><td style="text-align:right">${ok ? '✓' : '✗'}</td></tr>`;
+  }).join('') + '</table>';
+}
+
+async function renderCaptures(): Promise<void> {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id === undefined) return;
+  const list = (await browser.runtime.sendMessage({ type: 'getCaptures', tabId: tab.id })) as Capture[];
+  el('caps').innerHTML = list?.length
+    ? `<div class="sep">Bắt được trên tab này: ${list.length}</div>`
+      + '<table>' + list.map((c) => `<tr><td class="h">${esc(c.host)}</td></tr>`).join('') + '</table>'
+    : '<div class="sep">Chưa bắt được stream nào trên tab này.</div>';
+}
+
+async function renderStatus(): Promise<void> {
+  const { port } = await loadSettings();
   const t0 = performance.now();
   const state = await api.health();
   const ms = Math.round(performance.now() - t0);
   if (state === 'ok') {
-    status.innerHTML = '<span class="dot on"></span>Đã kết nối';
-    hint.textContent = `Backend 127.0.0.1:${port} · ${ms}ms`;
+    el('status').innerHTML = '<span class="dot on"></span>Đã kết nối';
+    el('hint').textContent = `Backend 127.0.0.1:${port} · ${ms}ms`;
   } else if (state === 'unreachable') {
-    status.innerHTML = '<span class="dot off"></span>App chưa chạy';
-    hint.textContent = `Không gọi được 127.0.0.1:${port}. Mở app Streamloot — kiểm tra icon ⤓ trên menu bar.`;
+    el('status').innerHTML = '<span class="dot off"></span>App chưa chạy';
+    // Kèm lý do: "app chưa chạy" và "app đang chạy nhưng trả lời quá chậm" là
+    // hai chuyện khác nhau, và người dùng không nên phải mở DevTools để phân biệt.
+    const why = api.lastHealthReason();
+    el('hint').textContent =
+      `Không gọi được 127.0.0.1:${port}. Mở app Streamloot — kiểm tra icon ⤓ trên menu bar.`
+      + (why ? ` (${why})` : '');
   } else {
-    status.innerHTML = '<span class="dot off"></span>App từ chối extension này';
-    hint.textContent =
+    el('status').innerHTML = '<span class="dot off"></span>App từ chối extension này';
+    el('hint').textContent =
       'App đang chạy nhưng không nhận diện được extension. Thường là do bản build thiếu `key` trong manifest nên ID không khớp. Build lại rồi Reload extension.';
   }
-
-  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id === undefined) return;
-  const list = (await browser.runtime.sendMessage({ type: 'getCaptures', tabId: tab.id })) as Capture[];
-  caps.innerHTML = list?.length
-    ? '<table>' + list.map((c) => `<tr><td class="h">${esc(c.host)}</td></tr>`).join('') + '</table>'
-    : '<div class="hint">Chưa bắt được stream nào trên tab này.</div>';
 }
 
-document.getElementById('opts')!.addEventListener('click', () => {
-  void browser.runtime.openOptionsPage();
+function showTab(which: 'dl' | 'hist'): void {
+  el('tab-dl').classList.toggle('on', which === 'dl');
+  el('tab-hist').classList.toggle('on', which === 'hist');
+  (el('pane-dl') as HTMLElement).hidden = which !== 'dl';
+  (el('pane-hist') as HTMLElement).hidden = which === 'dl';
+  if (which === 'hist') void renderHistory();
+}
+
+el('tab-dl').addEventListener('click', () => showTab('dl'));
+el('tab-hist').addEventListener('click', () => showTab('hist'));
+el('opts').addEventListener('click', () => void browser.runtime.openOptionsPage());
+
+// Uỷ quyền sự kiện: danh sách vẽ lại mỗi giây nên gắn listener lên từng nút sẽ
+// mất ngay ở lần vẽ kế tiếp.
+el('tasks').addEventListener('click', (ev) => {
+  const btn = (ev.target as HTMLElement).closest('button');
+  const id = (ev.target as HTMLElement).closest('.task')?.getAttribute('data-id');
+  if (!btn || !id || pending.has(id)) return;
+  const act = btn.getAttribute('data-act');
+  // Huỷ là thao tác phá huỷ — không được là nhánh mặc định cho data-act thiếu
+  // hoặc gõ sai. Chỉ ba giá trị hợp lệ mới được hành động.
+  if (act !== 'pause' && act !== 'resume' && act !== 'cancel') return;
+  const call = act === 'pause' ? api.pauseTask : act === 'resume' ? api.resumeTask : api.cancelTask;
+  pending.add(id);
+  btn.disabled = true;
+  void call(id)
+    .then(() => { el('err').textContent = ''; })
+    .catch((err) => { el('err').textContent = String(err?.message ?? err); })
+    .finally(() => {
+      pending.delete(id);
+      void renderTasks();
+    });
 });
 
-// render() không bọc lỗi thì mọi exception (storage hỏng, bridge chưa sẵn
-// sàng, JSON lỗi) đều để popup nằm nguyên ở "Đang kiểm tra…" — người dùng thấy
-// một cái popup treo và không có gì để báo lại. Hiện lỗi ra ngay trong popup.
-void render().catch((err) => {
-  const status = document.getElementById('status');
-  const hint = document.getElementById('hint');
-  if (status) status.innerHTML = '<span class="dot off"></span>Popup lỗi';
-  if (hint) hint.textContent = String(err?.message ?? err);
+// Báo service worker là có người đang xem => nó chuyển sang nhịp 1s (spec §4.2).
+void browser.runtime.sendMessage({ type: 'viewerOpen' }).catch(() => {});
+window.addEventListener('pagehide', () => {
+  void browser.runtime.sendMessage({ type: 'viewerClosed' }).catch(() => {});
+});
+
+const POLL_MS = 1000;
+const timer = setInterval(() => void renderTasks(), POLL_MS);
+window.addEventListener('pagehide', () => clearInterval(timer));
+
+/**
+ * Hiện ngay dữ liệu lần trước trong lúc chờ backend (D1, spec §4.1).
+ *
+ * Popup sống vài giây, nên một round-trip trắng màn hình chiếm phần lớn thời
+ * gian người dùng nhìn nó. Cache không phải nguồn sự thật — nó chỉ lấp chỗ
+ * trống, và bị thay ngay khi dữ liệu thật về.
+ */
+async function seedFromCache(): Promise<void> {
+  const [tasks, history] = await Promise.all([readCachedTasks(), readCachedHistory()]);
+  // Kiểm lại cờ SAU khi await: request thật có thể đã về xong trong lúc đọc
+  // storage, và bản cache tới sau không được ghi đè dữ liệu mới hơn.
+  if (!paintedLive && tasks.length) paintTasks(tasks);
+  if (!paintedLiveHistory && history.length) paintHistory(history);
+}
+
+void (async () => {
+  void seedFromCache();
+  await renderStatus();
+  await renderTasks();
+  await renderCaptures();
+})().catch((err) => {
+  el('status').innerHTML = '<span class="dot off"></span>Popup lỗi';
+  el('hint').textContent = String(err?.message ?? err);
   console.error('Streamloot popup:', err);
 });

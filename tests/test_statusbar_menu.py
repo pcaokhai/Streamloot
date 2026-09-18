@@ -6,7 +6,7 @@ from unittest.mock import patch
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from apps.desktop.statusbar_menu import build_menu_model
+from apps.desktop.statusbar_menu import build_menu_model, ring_state
 
 
 class TestMenuModel(unittest.TestCase):
@@ -102,6 +102,52 @@ class TestRebuildGuard(unittest.TestCase):
 
             mock_log_error.assert_called_once()
             self.assertIn("boom", mock_log_error.call_args[0][0])
+
+
+class TestRingState(unittest.TestCase):
+    """
+    Vòng tiến trình trên icon menu bar. Tách khỏi phần vẽ AppKit để chạy thử
+    được — NSImage cần môi trường đồ hoạ, còn quyết định thì không.
+    """
+
+    def _task(self, **kw):
+        base = {"task_id": "t", "title": "T", "status": "downloading", "progress": 0.0}
+        base.update(kw)
+        return base
+
+    def test_no_tasks_means_no_ring(self):
+        self.assertIsNone(ring_state([]))
+
+    def test_follows_the_most_recent_task_not_the_average(self):
+        """get_active_tasks trả mới nhất trước; lấy trung bình sẽ làm vòng chạy ngược."""
+        state = ring_state([
+            self._task(task_id="moi", progress=5.0),
+            self._task(task_id="cu", progress=90.0),
+        ])
+        self.assertEqual(state["pct"], 5)
+
+    def test_quantises_down_to_multiples_of_five(self):
+        self.assertEqual(ring_state([self._task(progress=37.0)])["pct"], 35)
+        self.assertEqual(ring_state([self._task(progress=39.9)])["pct"], 35)
+        self.assertEqual(ring_state([self._task(progress=40.0)])["pct"], 40)
+
+    def test_clamps_out_of_range(self):
+        self.assertEqual(ring_state([self._task(progress=-5.0)])["pct"], 0)
+        self.assertEqual(ring_state([self._task(progress=140.0)])["pct"], 100)
+
+    def test_survives_missing_or_bad_progress(self):
+        """Vòng hỏng thì icon xấu, không được phép làm sập menu bar."""
+        self.assertEqual(ring_state([self._task(progress=None)])["pct"], 0)
+        self.assertEqual(ring_state([{"task_id": "t", "status": "downloading"}])["pct"], 0)
+        self.assertEqual(ring_state([self._task(progress=float("nan"))])["pct"], 0)
+
+    def test_paused_is_reported_separately_from_progress(self):
+        state = ring_state([self._task(status="paused", progress=42.0)])
+        self.assertTrue(state["paused"])
+        self.assertEqual(state["pct"], 40)
+
+    def test_downloading_is_not_paused(self):
+        self.assertFalse(ring_state([self._task(progress=10.0)])["paused"])
 
 
 if __name__ == "__main__":

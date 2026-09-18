@@ -26,6 +26,7 @@ from services.manifest_probe import probe_duration
 from utils.proc import signal_tree
 from services.history_service import HistoryService
 from extractors.factory import ExtractorFactory
+from extractors.ytdlp_default import YtDlpDefaultExtractor
 from downloaders.ytdlp import YtDlpDownloader
 from core.models import VideoInfo
 from utils.ytdlp_version import check_ytdlp_update
@@ -662,6 +663,23 @@ def delete_history_item(record_id: int, delete_file: bool = False):
 def clear_history():
     history.clear_history()
     return {"message": "cleared"}
+
+
+@app.get("/api/v1/extractor", dependencies=[Depends(verify_api_key)])
+def describe_extractor(url: str):
+    """
+    URL này có plugin riêng xử lý không?
+
+    Extension cần biết để chọn đường: site có plugin thì đường manifest là
+    đường đúng (plugin làm những việc riêng của site — gỡ nguỵ trang segment,
+    header, cookie — mà hỏi yt-dlp bằng URL trang sẽ mất hết). Site không có
+    plugin thì hỏi thẳng yt-dlp cho ra nhiều chất lượng hơn.
+
+    Cố ý chỉ trả BOOLEAN cho đúng URL người dùng đang mở, không trả danh sách
+    tên miền nào — danh sách đó là thứ phải giữ kín (CLAUDE.md §3.1).
+    """
+    extractor = ExtractorFactory.get_extractor(url)
+    return {"plugin": type(extractor) is not YtDlpDefaultExtractor}
 
 
 @app.get("/api/v1/formats", dependencies=[Depends(verify_api_key)])
