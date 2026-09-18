@@ -207,7 +207,7 @@ export default defineBackground(() => {
 
     if (m?.type === 'viewerOpen') {
       viewers += 1;
-      void tick(); // đổi sang nhịp 1s ngay, đừng đợi hết chu kỳ 60s
+      runTick(); // đổi sang nhịp 1s ngay, đừng đợi hết chu kỳ 60s
       return Promise.resolve({ ok: true });
     }
     if (m?.type === 'viewerClosed') {
@@ -247,11 +247,40 @@ export default defineBackground(() => {
    * (setTimeout dài không sống nổi qua lần MV3 thu hồi worker). Hết task thì
    * DỪNG cả hai — poll rỗng chính là cách giữ worker sống mà D4 loại bỏ.
    */
+  /**
+   * `browser.alarms` có thể KHÔNG tồn tại.
+   *
+   * Quyền `alarms` chỉ có hiệu lực sau khi Reload extension; bản đang chạy được
+   * nạp trước lúc thêm quyền sẽ thấy `chrome.alarms === undefined`. Trước đây
+   * mọi nhánh của schedule() đều chạm thẳng vào nó, nên một quyền thiếu ném lỗi
+   * ngay lần gọi đầu — mà schedule() được gọi trong tick(), vốn trước đây chạy
+   * qua `void tick()` nên lỗi bị nuốt
+   * và CẢ vòng poll chết lặng: badge đứng yên, vòng tiến trình không bao giờ vẽ,
+   * danh sách task không bao giờ mới. Đã gặp thật.
+   *
+   * Thiếu thì kêu to một lần rồi chạy tiếp bằng setTimeout: kém hơn (không sống
+   * qua lần MV3 thu hồi worker) nhưng còn hoạt động, thay vì chết câm.
+   */
+  let alarmsWarned = false;
+  function alarms(): typeof browser.alarms | null {
+    const api = browser.alarms as typeof browser.alarms | undefined;
+    if (api) return api;
+    if (!alarmsWarned) {
+      alarmsWarned = true;
+      console.error(
+        '[Streamloot] Không có chrome.alarms — quyền `alarms` chưa có trong bản đang chạy. ' +
+          'Vào chrome://extensions bấm Reload cho Streamloot. ' +
+          'Tạm thời chỉ còn nhịp ngắn, và nó sẽ chết khi MV3 thu hồi service worker.',
+      );
+    }
+    return null;
+  }
+
   function schedule(tasks: TaskRecord[]): void {
     if (timer) { clearTimeout(timer); timer = null; }
     const ms = nextPollMs({ viewersOpen: viewers > 0, hasActive: tasks.length > 0 });
     if (ms === null) {
-      void browser.alarms.clear(ALARM);
+      void alarms()?.clear(ALARM);
       return;
     }
     // Hợp đồng của nextPollMs chỉ trả 1000 | 60000 | null — so bằng đúng giá trị
@@ -261,14 +290,31 @@ export default defineBackground(() => {
       // đang hoạt động hay không — setTimeout chết theo worker, giữ nguyên
       // alarm 60s làm lưới đỡ: worker hồi sinh, tick() lại chạy. Bắn trùng vô
       // hại vì tick() tự chặn bằng tickSeq.
-      timer = setTimeout(() => void tick(), ms);
-      void browser.alarms.create(ALARM, { periodInMinutes: 1 });
+      timer = setTimeout(runTick, ms);
+      void alarms()?.create(ALARM, { periodInMinutes: 1 });
+    } else if (alarms()) {
+      void alarms()!.create(ALARM, { periodInMinutes: ms / 60000 });
     } else {
-      void browser.alarms.create(ALARM, { periodInMinutes: ms / 60000 });
+      // Không có alarms: lùi về setTimeout cho cả nhịp dài. Nó chết theo worker,
+      // nhưng thà nhịp kém còn hơn không có nhịp nào.
+      timer = setTimeout(runTick, ms);
     }
   }
 
   let tickSeq = 0;
+
+  /**
+   * Chạy tick mà KHÔNG nuốt lỗi.
+   *
+   * `void tick()` vứt promise đi, nên bất kỳ lỗi nào trong vòng poll — một API
+   * trình duyệt vắng mặt, một thay đổi hình dạng dữ liệu — đều biến mất không
+   * dấu vết và vòng poll chết câm. Ghi lại rồi mới bỏ qua.
+   */
+  function runTick(): void {
+    tick().catch((err) => {
+      console.error('[Streamloot] vòng poll hỏng — sẽ không tự chạy lại cho tới sự kiện kế tiếp:', err);
+    });
+  }
 
   async function tick(): Promise<void> {
     const mine = ++tickSeq;
@@ -284,10 +330,10 @@ export default defineBackground(() => {
   }
 
   browser.alarms.onAlarm.addListener((a) => {
-    if (a.name === ALARM) void tick();
+    if (a.name === ALARM) runTick();
   });
 
   // Task có thể đã chạy từ trước lần khởi động này (do app hoặc CLI bắt đầu, hoặc
   // service worker vừa bị thu hồi) — hỏi backend một phát để dựng lại.
-  void tick();
+  runTick();
 });
