@@ -6,7 +6,7 @@ from unittest.mock import patch
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from apps.desktop.statusbar_menu import build_menu_model, ring_state
+from apps.desktop.statusbar_menu import build_menu_model, ring_state, refresh_off_main
 
 
 class TestMenuModel(unittest.TestCase):
@@ -148,6 +148,40 @@ class TestRingState(unittest.TestCase):
 
     def test_downloading_is_not_paused(self):
         self.assertFalse(ring_state([self._task(progress=10.0)])["paused"])
+
+
+
+class TestRefreshOffMain(unittest.TestCase):
+    """
+    evaluate_js gọi từ main thread là tự khoá (pywebview đợi main thread chạy
+    JS giúp nó). Cái duy nhất cần bảo đảm: lời gọi KHÔNG nằm trên main thread.
+    """
+
+    def test_evaluate_js_runs_on_a_non_main_thread(self):
+        import threading
+        seen = {}
+
+        class FakeWindow:
+            def evaluate_js(self, script):
+                seen["thread"] = threading.current_thread()
+                seen["script"] = script
+
+        th = refresh_off_main(FakeWindow(), "x()")
+        th.join(timeout=2)
+        self.assertIsNot(seen["thread"], threading.main_thread())
+        self.assertEqual(seen["script"], "x()")
+
+    def test_swallows_and_logs_evaluate_js_errors(self):
+        logged = []
+
+        class Broken:
+            def evaluate_js(self, script):
+                raise RuntimeError("webview chưa sẵn sàng")
+
+        th = refresh_off_main(Broken(), "x()", logger=logged.append)
+        th.join(timeout=2)
+        self.assertEqual(len(logged), 1)
+        self.assertIn("chưa sẵn sàng", logged[0])
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ from utils import paths
 # Dùng đường package (namespace package, PROJECT_ROOT đã ở sys.path phía trên)
 # cho nhất quán với apps.api và để PyInstaller phân giải được trong bundle.
 from apps.desktop import statusbar
+from apps.desktop.statusbar_menu import refresh_off_main
 from utils.logger import Logger
 
 
@@ -175,10 +176,14 @@ def main():
         # (_Target.onShow_), mà evaluate_js ném được (webview chưa sẵn sàng,
         # trang đang điều hướng). Để lọt ra là mục "Mở cửa sổ Streamloot" vỡ im
         # lặng. window.show() KHÔNG bọc — cái đó hỏng thì phải kêu to.
-        try:
-            window.evaluate_js("window.dispatchEvent(new Event('streamloot:refresh'))")
-        except Exception as e:
-            Logger.error(f"Không gửi được streamloot:refresh vào cửa sổ: {e}", exc_info=True)
+        # KHÔNG gọi evaluate_js ở đây: hàm này đang chạy trên main thread (ObjC
+        # action selector), mà evaluate_js lại đợi main thread chạy JS giúp nó
+        # -> tự khoá, app treo tới khi bị force-quit. Xem refresh_off_main.
+        refresh_off_main(
+            window,
+            "window.dispatchEvent(new Event('streamloot:refresh'))",
+            logger=Logger.error,
+        )
 
     def quit_app():
         global _quitting

@@ -261,3 +261,27 @@ toàn bộ lịch sử nhánh.
 tạm dừng, tiếp tục, huỷ, cửa sổ app cập nhật theo thời gian thực.
 
 Còn treo: ký (sign) và công chứng (notarize) bản `.app`.
+
+## Bug 14. App treo 214s sau khi chọn "Mở cửa sổ" ở menu bar khi đang tải
+
+**Triệu chứng.** Đang tải, bấm icon menu bar → menu mở → chọn mở cửa sổ → app
+đứng hình, phải force-quit (2026-09-18 20:21).
+
+**Bằng chứng.** `/Library/Logs/DiagnosticReports/Streamloot_2026-09-18-202152….hang`:
+main thread kẹt 31/31 mẫu ở `lock_PyThread_acquire_lock` bên trong
+`NSMenu performActionForItem` → Python.
+
+**Nguyên nhân.** `show_window()` gọi `window.evaluate_js` từ `onShow_` — action
+selector chạy trên main thread. `evaluate_js` của pywebview
+(`platforms/cocoa.py`) xếp hàng JS lên main run loop bằng `AppHelper.callAfter`
+rồi đứng đợi semaphore kết quả. Main thread đang đợi thì block JS phía sau
+không bao giờ tới lượt: tự khoá. `onToggle_`/`onCancel_` đã được đẩy ra thread
+riêng từ bug trước (`_off_main`), chỉ `show` bị bỏ sót.
+
+**Sửa.** `refresh_off_main()` trong `apps/desktop/statusbar_menu.py`: chạy
+`evaluate_js` ở thread nền, có test khẳng định lời gọi không nằm trên main
+thread. `window.show()` giữ nguyên — nó chỉ `callAfter`, không đợi.
+
+**Bài học.** Bất kỳ hàm pywebview nào *trả kết quả* (`evaluate_js`, `get_cookies`,
+`create_file_dialog`, `get_current_url`) đều đợi main thread — không bao giờ
+gọi từ selector AppKit. Tìm bằng `grep -n "semaphore.acquire" platforms/cocoa.py`.

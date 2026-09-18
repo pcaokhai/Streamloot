@@ -84,3 +84,30 @@ def ring_state(active_tasks: list) -> Optional[dict]:
         pct = int(max(0.0, min(100.0, float(progress))) // RING_STEP * RING_STEP)
 
     return {"pct": pct, "paused": task.get("status") == "paused"}
+
+
+def refresh_off_main(window, script: str, logger=None) -> "threading.Thread":
+    """
+    Gửi JS vào cửa sổ từ một thread NỀN, không bao giờ từ main thread.
+
+    `evaluate_js` của pywebview (platforms/cocoa.py) làm hai việc: xếp hàng
+    việc chạy JS lên main run loop bằng `AppHelper.callAfter`, rồi ĐỨNG ĐỢI
+    semaphore kết quả. Gọi nó từ một action selector của menu bar (đang chạy
+    trên chính main thread) là tự khoá: block JS xếp hàng phía sau không bao
+    giờ tới lượt vì main thread đang bận đợi nó. Spindump 2026-09-18 20:21
+    ghi nhận main thread kẹt 214s ở `lock_PyThread_acquire_lock` đúng chỗ này.
+
+    Trả về thread để test kiểm được nó chạy ở đâu; caller bình thường bỏ qua.
+    """
+    import threading as _t
+
+    def run():
+        try:
+            window.evaluate_js(script)
+        except Exception as e:  # webview chưa sẵn sàng, trang đang điều hướng
+            if logger is not None:
+                logger(f"Không gửi được JS vào cửa sổ: {e}")
+
+    th = _t.Thread(target=run, daemon=True, name="streamloot-page-refresh")
+    th.start()
+    return th
