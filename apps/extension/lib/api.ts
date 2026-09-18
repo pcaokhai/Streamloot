@@ -82,6 +82,28 @@ export type Health = 'ok' | 'unreachable' | 'rejected';
  * chạy thì mở app, còn bị từ chối thì ID extension không khớp — hai cách sửa
  * hoàn toàn khác nhau.
  */
+/**
+ * Hạn giờ cho health.
+ *
+ * 4s là quá ngắn khi backend vừa khởi động hoặc đang bận: nó biến một lần chậm
+ * thành "App chưa chạy", mà hai thứ đó người dùng xử lý khác nhau hoàn toàn.
+ * Backend ở localhost nên 10s vẫn không ai phải ngồi đợi thật — quá 10s thì
+ * đúng là có gì đó sai.
+ */
+const HEALTH_TIMEOUT_MS = 10_000;
+
+/**
+ * Lý do lần health gần nhất thất bại, để popup hiện ra được.
+ *
+ * Bắt người dùng mở DevTools mới biết vì sao thì cũng gần như không nói gì.
+ * `null` khi lần gần nhất thành công.
+ */
+let lastHealthError: string | null = null;
+
+export function lastHealthReason(): string | null {
+  return lastHealthError;
+}
+
 export async function health(): Promise<Health> {
   let res: Response;
   try {
@@ -93,11 +115,22 @@ export async function health(): Promise<Health> {
     // đọc được đúng con số không. Quá hạn thì coi như không gọi được.
     res = await fetch(`${await baseUrl()}/health`, {
       headers: jsonHeaders(),
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
     });
-  } catch {
+  } catch (err) {
+    // Ghi ra LÝ DO. Trước đây mọi thất bại đều thành 'unreachable' và popup hiện
+    // "App chưa chạy" — kể cả khi app đang chạy và chỉ là hết giờ, hay khi
+    // `loadSettings()` ném lỗi (nó nằm trong try này). Gộp như thế là bắt người
+    // dùng đoán, và đã thật sự làm mất thời gian: popup báo app chưa chạy trong
+    // lúc app đang tải video.
+    const kind = err instanceof DOMException && err.name === 'TimeoutError'
+      ? `hết giờ sau ${HEALTH_TIMEOUT_MS}ms`
+      : String(err);
+    lastHealthError = kind;
+    console.warn(`[Streamloot] health thất bại (${kind})`, err);
     return 'unreachable';
   }
+  lastHealthError = null;
   if (res.status === 401 || res.status === 403) return 'rejected';
   return res.ok ? 'ok' : 'rejected';
 }

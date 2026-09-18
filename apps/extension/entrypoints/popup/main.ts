@@ -110,7 +110,12 @@ async function renderStatus(): Promise<void> {
     el('hint').textContent = `Backend 127.0.0.1:${port} · ${ms}ms`;
   } else if (state === 'unreachable') {
     el('status').innerHTML = '<span class="dot off"></span>App chưa chạy';
-    el('hint').textContent = `Không gọi được 127.0.0.1:${port}. Mở app Streamloot — kiểm tra icon ⤓ trên menu bar.`;
+    // Kèm lý do: "app chưa chạy" và "app đang chạy nhưng trả lời quá chậm" là
+    // hai chuyện khác nhau, và người dùng không nên phải mở DevTools để phân biệt.
+    const why = api.lastHealthReason();
+    el('hint').textContent =
+      `Không gọi được 127.0.0.1:${port}. Mở app Streamloot — kiểm tra icon ⤓ trên menu bar.`
+      + (why ? ` (${why})` : '');
   } else {
     el('status').innerHTML = '<span class="dot off"></span>App từ chối extension này';
     el('hint').textContent =
