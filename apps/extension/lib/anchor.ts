@@ -134,3 +134,25 @@ export function shouldHideFab(o: {
   if (!o.anchored || o.panelOpen || o.hovering) return false;
   return o.msSinceLeave >= FAB_HIDE_MS;
 }
+
+/**
+ * Con trỏ có đang nằm trên một trong các vùng này không (kể cả phần đệm).
+ *
+ * Dùng thay cho `mouseenter` gắn vào chính phần tử `<video>`: player thật
+ * (JW Player, video.js, plyr…) phủ lớp điều khiển LÊN TRÊN video, nên chuột không
+ * bao giờ "vào" phần tử video — sự kiện bị lớp phủ nuốt và nút không bao giờ
+ * hiện ra. Đo theo toạ độ thì lớp phủ không ảnh hưởng gì.
+ */
+export function isOverRect(
+  pt: { x: number; y: number },
+  rects: Rect[],
+  pad = 0,
+): boolean {
+  return rects.some(
+    (r) =>
+      pt.x >= r.left - pad &&
+      pt.x <= r.left + r.width + pad &&
+      pt.y >= r.top - pad &&
+      pt.y <= r.top + r.height + pad,
+  );
+}

@@ -1,4 +1,4 @@
-import { pickAnchor, buttonPos, panelPos, shouldHideFab, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX, PANEL_W, PANEL_GAP, FAB_HIDE_MS } from '../.tmp-anchor.mjs';
+import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX, PANEL_W, PANEL_GAP, FAB_HIDE_MS } from '../.tmp-anchor.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -70,6 +70,14 @@ t('rời chuột chưa đủ lâu thì còn hiện', () => shouldHideFab({ ...ba
 t('đang rê chuột thì không ẩn', () => shouldHideFab({ ...base, hovering: true }), false);
 t('panel đang mở thì không ẩn', () => shouldHideFab({ ...base, panelOpen: true }), false);
 t('không neo được video thì luôn hiện (§5.1.1)', () => shouldHideFab({ ...base, anchored: false }), false);
+
+// --- con trỏ trên video: đo toạ độ, KHÔNG dựa vào mouseenter của <video> ---
+const VID = [{ top: 100, left: 200, width: 640, height: 360 }];
+t('con trỏ giữa video thì tính là đang trên video', () => isOverRect({ x: 500, y: 250 }, VID), true);
+t('con trỏ ngoài video thì không', () => isOverRect({ x: 50, y: 50 }, VID), false);
+t('sát mép vẫn tính là trên video', () => isOverRect({ x: 200, y: 100 }, VID), true);
+t('ngoài mép một chút nhưng trong vùng đệm thì vẫn tính', () => isOverRect({ x: 195, y: 100 }, VID, 8), true);
+t('không có vùng nào thì luôn false', () => isOverRect({ x: 1, y: 1 }, []), false);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

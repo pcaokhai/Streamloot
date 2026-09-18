@@ -15,7 +15,7 @@
 import './style.css';
 import type { Capture, FormatOption, VideoInfoPayload } from '../../lib/types';
 import { pickCapture } from '../../lib/pick';
-import { pickAnchor, buttonPos, panelPos, shouldHideFab, BTN_SIZE, BTN_PAD, FAB_HIDE_MS } from '../../lib/anchor';
+import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, BTN_SIZE, BTN_PAD, FAB_HIDE_MS } from '../../lib/anchor';
 import { groupFormats } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
@@ -153,7 +153,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     let hovering = false;
     let leftAt = 0; // 0 = chưa từng rê vào -> coi như rời từ lâu -> ẩn
     let hideTimer: ReturnType<typeof setTimeout> | undefined;
-    let hoverTarget: HTMLVideoElement | null = null;
 
     function applyFabVisibility(): void {
       fab.classList.toggle('sl-hidden', shouldHideFab({
@@ -173,19 +172,38 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       }
       applyFabVisibility();
     }
-    const onEnter = () => setHover(true);
-    const onLeave = () => setHover(false);
-    fab.addEventListener('mouseenter', onEnter);
-    fab.addEventListener('mouseleave', onLeave);
-    /** Video neo đổi thì chuyển listener chuột sang cái mới, gỡ khỏi cái cũ. */
-    function bindHover(v: HTMLVideoElement | null): void {
-      if (v === hoverTarget) return;
-      hoverTarget?.removeEventListener('mouseenter', onEnter);
-      hoverTarget?.removeEventListener('mouseleave', onLeave);
-      hoverTarget = v;
-      v?.addEventListener('mouseenter', onEnter);
-      v?.addEventListener('mouseleave', onLeave);
+    /**
+     * Theo dõi chuột bằng TOẠ ĐỘ trên document, không bằng mouseenter của
+     * <video>.
+     *
+     * Player thật phủ lớp điều khiển lên trên video (JW Player, video.js, plyr…),
+     * nên mouseenter gắn vào phần tử video không bao giờ nổ — đó chính là lý do
+     * nút không hiện dù đã rê chuột vào video. Đo toạ độ thì lớp phủ vô hại.
+     *
+     * Gộp theo rAF: mousemove bắn hàng trăm lần mỗi giây, còn
+     * getBoundingClientRect thì ép trình duyệt tính lại layout.
+     */
+    let moveQueued = false;
+    function onMove(ev: MouseEvent): void {
+      if (moveQueued) return;
+      moveQueued = true;
+      const { clientX: x, clientY: y } = ev;
+      requestAnimationFrame(() => {
+        moveQueued = false;
+        const rects = [];
+        if (anchored) rects.push(anchored.getBoundingClientRect());
+        if (!fab.classList.contains('sl-hidden')) rects.push(fab.getBoundingClientRect());
+        // Vùng đệm bằng cả nút + lề: nút nằm NGOÀI mép trên video, nên đường đi
+        // từ video lên tới nút không được tính là "đã rời video".
+        const over = isOverRect({ x, y }, rects, BTN_SIZE + BTN_PAD);
+        if (over !== hovering) setHover(over);
+      });
     }
+    const onDocLeave = () => setHover(false);
+    document.addEventListener('mousemove', onMove, { passive: true, capture: true });
+    // Chuột ra khỏi hẳn cửa sổ thì mousemove không bắn nữa — bắt riêng, nếu
+    // không nút sẽ đứng nguyên trạng thái "đang rê" mãi.
+    document.addEventListener('mouseleave', onDocLeave, { passive: true });
 
     /** Đo lại và đặt nút. Gọi từ observer, không từ bộ đếm. */
     function place(): void {
@@ -209,7 +227,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       fab.style.top = `${pos.top}px`;
       fab.style.left = `${pos.left}px`;
       placePanel(pos);
-      bindHover(anchored);
       applyFabVisibility();
     }
 
@@ -262,6 +279,9 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onScroll);
       document.removeEventListener('fullscreenchange', onScroll, true);
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('mouseleave', onDocLeave);
+      clearTimeout(hideTimer);
     });
 
     // Mount ngay để nút nổi lên trang — không có cách nào bấm mở panel lần
