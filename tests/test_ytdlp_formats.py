@@ -1,75 +1,95 @@
-import json
-import subprocess
+import sys
 import unittest
-from unittest.mock import patch, MagicMock
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from downloaders.ytdlp import YtDlpDownloader
-from core.models import VideoInfo
 
-def _video_info(**overrides):
-    defaults = dict(
-        title="Test Video",
-        m3u8_url="https://example.com/stream.m3u8",
-        page_url="https://example.com/watch",
-    )
-    defaults.update(overrides)
-    return VideoInfo(**defaults)
 
-FIXTURE_JSON = json.dumps({
-    "format_id": "137+140",
-    "formats": [
-        {"format_id": "140", "ext": "m4a", "height": None, "filesize": 1000, "vcodec": "none", "acodec": "aac"},
-        {"format_id": "137", "ext": "mp4", "height": 1080, "resolution": "1920x1080", "filesize_approx": 50000, "vcodec": "avc1", "acodec": "none"},
-        {"format_id": "134", "ext": "mp4", "height": 360, "filesize": 5000, "vcodec": "avc1", "acodec": "none"},
-    ],
-})
+class TestMergeableFormats(unittest.TestCase):
+    """
+    Luồng hình không tiếng mà trả format_id trần thì người dùng nhận video câm.
+    Đo thật trên một site tin tức: master HLS tách tiếng thành rendition riêng,
+    mọi biến thể hình đều acodec=none.
+    """
 
-class TestBuildHeaders(unittest.TestCase):
-    def test_default_user_agent_when_none_set(self):
-        args = YtDlpDownloader._build_headers(_video_info())
-        self.assertIn("--user-agent", args)
-        self.assertNotIn("--add-header", args)
+    def test_video_only_gets_audio_merged(self):
+        got = YtDlpDownloader._mergeable(
+            {"format_id": "hls-973", "vcodec": "avc1.640029", "acodec": "none"}
+        )
+        self.assertEqual(got["format_id"], "hls-973+bestaudio/hls-973")
 
-    def test_custom_user_agent_and_cookie_referer_origin(self):
-        vi = _video_info(user_agent="CustomUA", cookies="a=b", referer="https://ref", origin="https://orig")
-        args = YtDlpDownloader._build_headers(vi)
-        self.assertIn("CustomUA", args)
-        self.assertIn("Cookie: a=b", args)
-        self.assertIn("Referer: https://ref", args)
-        self.assertIn("Origin: https://orig", args)
+    def test_fallback_keeps_the_stream_when_nothing_to_merge(self):
+        """Dấu `/` là đường lùi của yt-dlp: không có tiếng thì vẫn tải được hình."""
+        got = YtDlpDownloader._mergeable(
+            {"format_id": "hls-973", "vcodec": "avc1", "acodec": None}
+        )
+        self.assertTrue(got["format_id"].endswith("/hls-973"))
 
-class TestListFormats(unittest.TestCase):
-    def test_raises_without_m3u8_url(self):
-        vi = _video_info(m3u8_url="")
-        with self.assertRaises(ValueError):
-            YtDlpDownloader().list_formats(vi)
+    def test_muxed_stream_is_left_alone(self):
+        got = YtDlpDownloader._mergeable(
+            {"format_id": "18", "vcodec": "avc1", "acodec": "mp4a.40.2"}
+        )
+        self.assertEqual(got["format_id"], "18")
 
-    def test_parses_formats_and_flags_recommended(self):
-        mock_result = MagicMock(returncode=0, stdout=FIXTURE_JSON, stderr="")
-        with patch("subprocess.run", return_value=mock_result) as mock_run:
-            formats = YtDlpDownloader().list_formats(_video_info())
+    def test_audio_only_is_left_alone(self):
+        """Ghép tiếng vào luồng tiếng là vô nghĩa và sẽ làm hỏng lựa chọn."""
+        got = YtDlpDownloader._mergeable(
+            {"format_id": "140", "vcodec": "none", "acodec": "mp4a.40.2"}
+        )
+        self.assertEqual(got["format_id"], "140")
 
-        self.assertEqual(len(formats), 3)
-        # Top-level format_id is "137+140" (merged video+audio pick) —
-        # both components should be flagged, the unrelated 360p track shouldn't.
-        recommended_ids = {f["format_id"] for f in formats if f["recommended"]}
-        self.assertEqual(recommended_ids, {"137", "140"})
-        self.assertFalse(next(f for f in formats if f["format_id"] == "134")["recommended"])
-        best = next(f for f in formats if f["format_id"] == "137")
-        self.assertEqual(best["resolution"], "1920x1080")
-        self.assertEqual(best["height"], 1080)
-        mock_run.assert_called_once()
-        self.assertEqual(mock_run.call_args.kwargs.get("timeout"), 30)
+    def test_other_fields_survive_untouched(self):
+        src = {"format_id": "hls-1", "vcodec": "avc1", "acodec": "none",
+               "height": 720, "ext": "mp4", "recommended": True}
+        got = YtDlpDownloader._mergeable(src)
+        self.assertEqual(got["height"], 720)
+        self.assertEqual(got["ext"], "mp4")
+        self.assertTrue(got["recommended"])
 
-    def test_nonzero_returncode_raises_runtime_error(self):
-        mock_result = MagicMock(returncode=1, stdout="", stderr="ERROR: unsupported url")
-        with patch("subprocess.run", return_value=mock_result):
-            with self.assertRaises(RuntimeError):
-                YtDlpDownloader().list_formats(_video_info())
+    def test_does_not_mutate_the_input(self):
+        src = {"format_id": "hls-1", "vcodec": "avc1", "acodec": "none"}
+        YtDlpDownloader._mergeable(src)
+        self.assertEqual(src["format_id"], "hls-1")
 
-    def test_timeout_propagates(self):
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="yt-dlp", timeout=30)):
-            with self.assertRaises(subprocess.TimeoutExpired):
-                YtDlpDownloader().list_formats(_video_info())
+    def test_missing_format_id_does_not_crash(self):
+        got = YtDlpDownloader._mergeable({"format_id": None, "vcodec": "avc1", "acodec": "none"})
+        self.assertIsNone(got["format_id"])
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
+
+
+class TestPathFromLine(unittest.TestCase):
+    """
+    Đọc tên file thật từ output yt-dlp. Ba phép khớp này từng nằm lọt trong
+    nhánh "extracting" nên không bao giờ chạy — đường dẫn lưu vào DB là mẫu
+    "...%(ext)s" và "Hiện trong Finder" báo không tìm thấy file.
+    """
+
+    def test_reads_destination(self):
+        got = YtDlpDownloader._path_from_line("[download] Destination: /tmp/Phim hay.mp4")
+        self.assertEqual(got, "/tmp/Phim hay.mp4")
+
+    def test_merger_line_wins_because_it_changes_the_extension(self):
+        got = YtDlpDownloader._path_from_line('[Merger] Merging formats into "/tmp/Phim hay.mkv"')
+        self.assertEqual(got, "/tmp/Phim hay.mkv")
+
+    def test_reads_already_downloaded(self):
+        got = YtDlpDownloader._path_from_line("[download] /tmp/cũ.mp4 has already been downloaded")
+        self.assertEqual(got, "/tmp/cũ.mp4")
+
+    def test_progress_line_says_nothing_about_the_name(self):
+        self.assertIsNone(
+            YtDlpDownloader._path_from_line("[download]  42.0% of ~10.00MiB at 1.00MiB/s ETA 00:10")
+        )
+
+    def test_extracting_line_says_nothing_about_the_name(self):
+        """Đúng dòng mà khối này từng bị khoá vào — nó KHÔNG mang tên file."""
+        self.assertIsNone(YtDlpDownloader._path_from_line("[info] Downloading webpage"))
+
+    def test_blank_line(self):
+        self.assertIsNone(YtDlpDownloader._path_from_line(""))

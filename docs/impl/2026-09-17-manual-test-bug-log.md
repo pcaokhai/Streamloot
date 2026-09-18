@@ -334,3 +334,43 @@ biệt được trong/ngoài; `composedPath()` xuyên shadow boundary.
 **Bài học.** Dò trạng thái theo cạnh thì phụ thuộc vào việc sự kiện "kết thúc"
 chắc chắn tới. Ở web nó thường KHÔNG tới: iframe nuốt chuột, tab bị ẩn, trang
 điều hướng. Đo mức (mốc thời gian + nhịp kiểm) thì tự phục hồi.
+
+## Bug 16. "Hiện trong Finder" báo không tìm thấy file
+
+**Triệu chứng.** Tải xong, bấm Show in Finder → "File not found on disk".
+
+**Nguyên nhân: một lỗi THỤT LỀ.** Trong `downloaders/ytdlp.py`, khối "Parse
+output filenames" nằm lọt *bên trong* `if "[youtube]" in line or "[info]" in
+line or "Downloading webpage" in line:`. Nghĩa là dòng `[download] Destination:
+…` chỉ được đọc khi cùng dòng đó *cũng* chứa `[info]` — không bao giờ xảy ra.
+`final_path` giữ nguyên mẫu `…%(ext)s`, và đó là thứ ghi vào DB.
+
+**Sửa.** Đưa khối ra đúng cấp, và tách thành `_path_from_line()` để TEST ĐƯỢC —
+lỗi này im lặng suốt vì không test nào chạm tới nó. 6 test, có kiểm ngược.
+
+## Bug 17. File tải về thiếu tiếng (hoặc thiếu hình)
+
+**Triệu chứng.** Hai video trên cùng một site tin tức: một cái tải về chỉ có
+tiếng, một cái chỉ có hình. YouTube và một site khác thì bình thường.
+
+**Đo thật, không đoán.** `yt-dlp -J` trên URL đó cho thấy master HLS tách tiếng
+thành rendition riêng: cả ba biến thể hình đều `acodec: none`, tiếng nằm ở
+`hls-default-audio-group-128k`. yt-dlp tự chọn thì ghép
+`hls-973+hls-default-audio-group-128k` — còn ta trả `hls-973` trần.
+
+**Nguyên nhân.** Cùng họ với bẫy itag của YouTube, nhưng ở HAI chỗ khác nhau:
+1. `list_formats` của backend trả thẳng id thô của yt-dlp cho client.
+2. Đường manifest nhanh trong extension trả URL biến thể — mà biến thể đó là
+   hình câm khi master có `#EXT-X-MEDIA:TYPE=AUDIO`.
+
+**Sửa.**
+1. Backend: `_mergeable()` đổi `<id>` thành `<id>+bestaudio/<id>` cho luồng
+   hình không tiếng. Dấu `/` là đường lùi của yt-dlp: không có tiếng để ghép
+   thì vẫn tải được hình thay vì hỏng cả lượt.
+2. Extension: `hasSeparateAudio()` nhận ra `#EXT-X-MEDIA:TYPE=AUDIO`; lúc đó
+   gửi URL **master** kèm bộ chọn `bv*[height=H]+ba/b[height=H]` thay vì URL
+   biến thể. Chọn theo chiều cao chứ không theo id, vì id HLS do yt-dlp tự đặt.
+
+**Bài học.** Bản sửa YouTube trước đó chỉ vá một đường (đọc từ trang). Cùng một
+lỗi tồn tại ở hai đường còn lại mà không ai kiểm — sửa một triệu chứng không
+phải sửa nguyên nhân. Lần này grep cả ba đường sinh `format_id`.

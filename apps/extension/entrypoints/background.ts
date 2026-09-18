@@ -17,7 +17,7 @@ import { applyIconState, flashCompleted } from '../lib/icon';
 import { cacheTasks } from '../lib/cache';
 import { nextPollMs, pickRingTask, shouldCacheFormatFailure } from '../lib/tasks';
 import { canSetHeaders, dirFilter, withHeaders } from '../lib/dnr';
-import { isLive, isMaster, isSubtitlePlaylist, parseMaster, singleFormat, totalDuration, variantsToFormats } from '../lib/m3u8';
+import { hasSeparateAudio, isLive, isMaster, isSubtitlePlaylist, parseMaster, singleFormat, totalDuration, variantsToFormats } from '../lib/m3u8';
 import type { Capture, FormatOption, TaskRecord, VideoInfoPayload } from '../lib/types';
 
 const MANIFEST_URL = /\.(m3u8|mpd)(\?|$)/i;
@@ -289,7 +289,11 @@ async function variantsFromManifest(info: VideoInfoPayload): Promise<FormatOptio
       ? [singleFormat(info.m3u8_url, totalDuration(text))]
       : null;
   }
-  const formats = variantsToFormats(parseMaster(text, info.m3u8_url));
+  const formats = variantsToFormats(
+    parseMaster(text, info.m3u8_url),
+    hasSeparateAudio(text),
+    info.m3u8_url,
+  );
   return formats.length ? formats : null;
 }
 

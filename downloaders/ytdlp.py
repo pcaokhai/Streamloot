@@ -86,7 +86,54 @@ class YtDlpDownloader(BaseDownloader):
         for f in parsed:
             f["recommended"] = f["format_id"] in recommended_components
 
-        return parsed
+        return [self._mergeable(f) for f in parsed]
+
+    @staticmethod
+    def _path_from_line(line: str) -> Optional[str]:
+        """
+        Đường dẫn file thật, đọc từ một dòng output của yt-dlp. `None` nếu dòng
+        đó không nói gì về tên file.
+
+        Tách riêng để TEST ĐƯỢC: trước đây ba phép khớp này nằm lọt trong nhánh
+        "extracting" nên không bao giờ chạy, và đường dẫn lưu vào DB là mẫu
+        "...%(ext)s" — "Hiện trong Finder" báo không tìm thấy file. Một lỗi thụt
+        lề không có test nào chạm tới thì im lặng suốt.
+
+        Thứ tự trong lượt tải: Destination -> (Merger) -> xong. Merger nói lời
+        cuối vì nó đổi cả phần mở rộng khi phải ghép hình với tiếng.
+        """
+        merge = re.search(r'\[Merger\] Merging formats into "(.*?)"', line)
+        if merge:
+            return merge.group(1)
+        dest = re.search(r'\[download\] Destination: (.*)', line)
+        if dest:
+            return dest.group(1).strip()
+        already = re.search(r'\[download\] (.*?) has already been downloaded', line)
+        if already:
+            return already.group(1).strip()
+        return None
+
+    @staticmethod
+    def _mergeable(f: dict) -> dict:
+        """
+        Luồng hình KHÔNG TIẾNG phải được ghép tiếng, nếu không người dùng nhận
+        một video câm.
+
+        HLS/DASH thường tách tiếng thành luồng riêng: mọi biến thể hình đều có
+        `acodec: none`, còn tiếng nằm ở một rendition khác. Trả `format_id` trần
+        cho client thì lúc tải yt-dlp lấy đúng luồng đó và chỉ luồng đó. Đo thật
+        trên một site tin tức: yt-dlp tự chọn `hls-973+hls-default-audio-group-128k`,
+        còn ta trả `hls-973` -> mất tiếng.
+
+        `<id>+bestaudio/<id>` là cú pháp yt-dlp: ghép nếu có tiếng để ghép,
+        không có thì lùi về chính luồng đó thay vì hỏng cả lượt tải.
+        """
+        vcodec = f.get("vcodec")
+        acodec = f.get("acodec")
+        video_only = vcodec not in (None, "none") and acodec in (None, "none")
+        if video_only and f.get("format_id"):
+            return {**f, "format_id": f"{f['format_id']}+bestaudio/{f['format_id']}"}
+        return f
 
     def download(self,
                  video_info: VideoInfo,
@@ -257,19 +304,15 @@ class YtDlpDownloader(BaseDownloader):
                             "speed": "--",
                             "eta": "--"
                         })
-                    
-                    # 4. Parse output filenames
-                    merge_match = re.search(r'\[Merger\] Merging formats into "(.*?)"', line)
-                    if merge_match:
-                        final_path = merge_match.group(1)
-                    
-                    dest_match = re.search(r'\[download\] Destination: (.*)', line)
-                    if dest_match:
-                        final_path = dest_match.group(1)
-                        
-                    already_match = re.search(r'\[download\] (.*?) has already been downloaded', line)
-                    if already_match:
-                        final_path = already_match.group(1)
+
+                # 4. Parse output filenames.
+                #
+                # Ở NGOÀI nhánh "extracting" phía trên. Trước đây khối này bị thụt
+                # vào trong nó, nghĩa là chỉ đọc tên file khi cùng một dòng vừa là
+                # "[info]" vừa là "[download] Destination:" — không bao giờ xảy ra.
+                found = self._path_from_line(line)
+                if found:
+                    final_path = found
                         
             process.wait()
             

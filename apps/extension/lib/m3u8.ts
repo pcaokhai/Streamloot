@@ -43,6 +43,18 @@ function absolute(url: string, base: string): string {
   }
 }
 
+/**
+ * Master có rendition TIẾNG RIÊNG không.
+ *
+ * `#EXT-X-MEDIA:TYPE=AUDIO` nghĩa là tiếng nằm ở luồng khác, còn mọi biến thể
+ * trong `#EXT-X-STREAM-INF` chỉ có hình. Tải thẳng URL một biến thể lúc đó cho
+ * ra **video câm** — đo thật trên một site tin tức: mọi biến thể đều
+ * `acodec: none`, tiếng ở một rendition riêng.
+ */
+export function hasSeparateAudio(text: string): boolean {
+  return /^#EXT-X-MEDIA:[^\n]*TYPE=AUDIO/im.test(text);
+}
+
 /** Có phải master playlist không (master liệt kê biến thể, không có segment). */
 export function isMaster(text: string): boolean {
   return /^#EXT-X-STREAM-INF:/m.test(text);
@@ -139,13 +151,30 @@ function heightFromBandwidth(bw: number | null): number | null {
  * `m3u8_url`, không dùng `format_id` — `hls-<bandwidth>` của yt-dlp không ổn
  * định giữa các lần chạy.
  */
-export function variantsToFormats(variants: Variant[]): import('./types').FormatOption[] {
+export function variantsToFormats(
+  variants: Variant[],
+  /**
+   * Tiếng nằm ở rendition riêng. Lúc đó KHÔNG được trả URL biến thể: phải để
+   * người tải nhìn thấy cả master thì mới ghép được tiếng vào hình.
+   */
+  separateAudio = false,
+  /** URL master — chỉ dùng khi `separateAudio`. */
+  masterUrl = '',
+): import('./types').FormatOption[] {
   const videos = variants.filter((v) => !v.audioOnly);
   const best = Math.max(0, ...videos.map((v) => v.height ?? heightFromBandwidth(v.bandwidth) ?? 0));
   return variants.map((v) => {
     const h = v.audioOnly ? null : v.height ?? heightFromBandwidth(v.bandwidth);
+    // Tiếng ở rendition riêng: gửi MASTER kèm bộ chọn theo chiều cao, để yt-dlp
+    // tự ghép hình với tiếng. Chọn theo chiều cao chứ không theo id vì id HLS
+    // (`hls-<bandwidth>`) do yt-dlp tự đặt, ta không đoán trước được.
+    const merged = separateAudio && !v.audioOnly && h !== null;
     return {
-      format_id: v.bandwidth ? `hls-${v.bandwidth}` : 'hls',
+      format_id: merged
+        ? `bv*[height=${h}]+ba/b[height=${h}]`
+        : v.bandwidth
+        ? `hls-${v.bandwidth}`
+        : 'hls',
       ext: v.audioOnly ? 'm4a' : 'mp4',
       resolution: v.width && v.height ? `${v.width}x${v.height}` : v.audioOnly ? 'audio only' : '',
       height: h,
@@ -153,7 +182,7 @@ export function variantsToFormats(variants: Variant[]): import('./types').Format
       vcodec: v.audioOnly ? 'none' : 'avc1',
       acodec: 'mp4a',
       recommended: !v.audioOnly && h !== null && h === best && best > 0,
-      url: v.url,
+      url: merged ? masterUrl : v.url,
     };
   });
 }

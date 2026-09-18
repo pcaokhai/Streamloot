@@ -1,4 +1,4 @@
-import { parseMaster, variantsToFormats, isMaster, isSubtitlePlaylist, isLive, totalDuration, singleFormat } from '../.tmp-m3u8.mjs';
+import { parseMaster, variantsToFormats, isMaster, isSubtitlePlaylist, isLive, totalDuration, singleFormat, hasSeparateAudio } from '../.tmp-m3u8.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -86,6 +86,22 @@ t('không đo được thời lượng thì để trống, không bịa',
 t('hình dạng khớp FormatOption',
   () => Object.keys(singleFormat('https://x.example.test/a.m3u8', 60)).sort(),
   ['acodec', 'ext', 'filesize', 'format_id', 'height', 'recommended', 'resolution', 'url', 'vcodec'].sort());
+
+// --- tiếng ở rendition riêng: URL biến thể là hình CÂM ---
+const SEP = `#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="vi",URI="aud/i.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=973000,RESOLUTION=1280x720,AUDIO="aud"
+720/i.m3u8`;
+t('nhận ra rendition tiếng riêng', () => hasSeparateAudio(SEP), true);
+t('master gộp sẵn tiếng thì không', () => hasSeparateAudio(MASTER), false);
+
+const sepF = variantsToFormats(parseMaster(SEP, BASE), true, BASE);
+t('tách tiếng thì gửi MASTER, không gửi URL biến thể', () => sepF[0].url, BASE);
+t('tách tiếng thì dùng bộ chọn theo chiều cao để yt-dlp ghép',
+  () => sepF[0].format_id, 'bv*[height=720]+ba/b[height=720]');
+t('master gộp sẵn thì vẫn gửi thẳng URL biến thể (nhanh hơn)',
+  () => variantsToFormats(parseMaster(MASTER, BASE), false, BASE)[0].url,
+  'https://cdn.example.test/dir/360p/index.m3u8');
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
