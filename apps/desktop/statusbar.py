@@ -178,12 +178,40 @@ def _ring_image(pct: int, paused: bool):
         rgb = _RING_PAUSED if paused else _RING_ACTIVE
         AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(*rgb, 1.0).set()
         arc.stroke()
+
+        _draw_arrow(c, rgb)
     finally:
         img.unlockFocus()
     # KHÔNG phải template image: template bị macOS tô lại thành đơn sắc theo
     # giao diện, mất hết màu cam lẫn xám phân biệt tạm-dừng.
     img.setTemplate_(False)
     return img
+
+
+def _draw_arrow(c: float, rgb) -> None:
+    """
+    Mũi tên tải xuống nằm giữa vòng, để liếc là biết icon của app nào.
+
+    Toạ độ theo trục Y của AppKit — hướng LÊN, ngược với canvas của trình duyệt.
+    Nên "mũi tên chỉ xuống" ở đây là đỉnh có y NHỎ nhất.
+    """
+    tip_y = c - 3.4        # đỉnh mũi tên, thấp nhất
+    barb_y = c - 0.6       # đáy đầu mũi tên
+    stem_top = c + 3.2
+    half_head = 2.9
+    half_stem = 0.95
+
+    p = AppKit.NSBezierPath.bezierPath()
+    p.moveToPoint_((c, tip_y))
+    p.lineToPoint_((c - half_head, barb_y))
+    p.lineToPoint_((c - half_stem, barb_y))
+    p.lineToPoint_((c - half_stem, stem_top))
+    p.lineToPoint_((c + half_stem, stem_top))
+    p.lineToPoint_((c + half_stem, barb_y))
+    p.lineToPoint_((c + half_head, barb_y))
+    p.closePath()
+    AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(*rgb, 1.0).set()
+    p.fill()
 
 
 def _apply_ring(button, state: Optional[dict], idle_title: str) -> None:

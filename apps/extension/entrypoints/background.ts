@@ -196,6 +196,13 @@ export default defineBackground(() => {
           // Stream ở background rồi đẩy từng sự kiện về tab. Content script
           // không tự stream được, cùng lý do Origin ở trên.
           void pumpProgress(task_id, tabId);
+          // Đánh thức vòng poll.
+          //
+          // nextPollMs trả null khi không còn task, nên trước cú tải này vòng
+          // poll đã DỪNG HẲN — và không có gì tự khởi động lại nó. Thiếu dòng
+          // này thì icon không mọc vòng tiến trình cho tới khi người dùng tình
+          // cờ mở popup (viewerOpen mới gọi runTick). Đã gặp thật.
+          runTick();
           return { ok: true as const, taskId: task_id };
         })
         .catch((e: unknown) => ({ ok: false as const, error: errorText(e) }));
