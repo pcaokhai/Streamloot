@@ -32,4 +32,4 @@ packaging/extension-key/public.der
 # Danh sách tên miền riêng tư dùng cho việc tự kiểm trước khi commit.
 # Sinh từ SUPPORTED_DOMAINS của plugin; bản thân nó không được commit.
 .privacy-patterns
-ref
+ref 

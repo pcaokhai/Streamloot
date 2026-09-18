@@ -156,3 +156,16 @@ export function isOverRect(
       pt.y <= r.top + r.height + pad,
   );
 }
+
+/**
+ * Hình chữ nhật có dùng được không.
+ *
+ * `getBoundingClientRect()` của một phần tử đã RỜI KHỎI DOM trả về toàn số 0 —
+ * không ném, không báo gì. Nếu coi đó là một vùng hợp lệ thì mọi phép kiểm
+ * "con trỏ có trên video không" đều ra false, và nút nổi ẩn vĩnh viễn dù người
+ * dùng rê chuột đúng chỗ. Player SPA dựng lại phần tử <video> sau khi bắt đầu
+ * tải là ca thường gặp.
+ */
+export function isUsableRect(r: Rect): boolean {
+  return r.width > 0 && r.height > 0;
+}

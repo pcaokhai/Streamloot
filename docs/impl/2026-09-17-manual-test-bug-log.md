@@ -285,3 +285,27 @@ thread. `window.show()` giữ nguyên — nó chỉ `callAfter`, không đợi.
 **Bài học.** Bất kỳ hàm pywebview nào *trả kết quả* (`evaluate_js`, `get_cookies`,
 `create_file_dialog`, `get_current_url`) đều đợi main thread — không bao giờ
 gọi từ selector AppKit. Tìm bằng `grep -n "semaphore.acquire" platforms/cocoa.py`.
+
+## Bug 14. Bắt đầu tải xong thì nút nổi mất hẳn, rê chuột vào video không hiện lại
+
+**Triệu chứng.** Chọn format → app bắt đầu tải → nút nổi biến mất và không bao
+giờ trở lại, kể cả khi rê chuột đúng vào video (2026-09-18).
+
+**Hai nguyên nhân chồng nhau, cùng một gốc: tin vào trạng thái cũ thay vì đo lại.**
+
+1. `onMove` đo "con trỏ có trên video không" bằng `anchored` — tham chiếu tới
+   phần tử `<video>` chọn từ trước. Player SPA dựng lại phần tử video sau khi
+   bắt đầu tải, nên `anchored` trỏ vào node đã rời DOM. `getBoundingClientRect()`
+   của node rời DOM trả **toàn số 0 mà không ném, không báo** — nên phép kiểm
+   luôn ra false, còn `anchored !== null` vẫn đúng nên `shouldHideFab` cứ ẩn.
+   Sửa: `isUsableRect` (có test) loại rect toàn số 0, và thấy rect hỏng hoặc
+   `!isConnected` thì `place()` neo lại.
+
+2. Đường thành công gọi `setHover(false)` — **nói dối rằng chuột đã rời video**
+   trong khi con trỏ vẫn nằm trên đó. Chuột đứng yên thì không có `mousemove`
+   nào để đính chính, nên 10s sau nút ẩn đi một cách vô lý. Sửa: chỉ gọi
+   `applyFabVisibility()`, để vị trí chuột thật quyết định. Nút ✕ cũng vậy.
+
+**Bài học.** Cùng họ với các bug trước trong nhánh này: ép một trạng thái mà ta
+chỉ *giả định*, thay vì đo cái đang có thật. Ở đây có hai lớp — một tham chiếu
+DOM đã chết vẫn trả lời như thật, và một sự kiện chuột được bịa ra.

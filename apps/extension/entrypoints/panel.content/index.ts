@@ -15,7 +15,7 @@
 import './style.css';
 import type { Capture, FormatOption, VideoInfoPayload } from '../../lib/types';
 import { pickCapture } from '../../lib/pick';
-import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, BTN_SIZE, BTN_PAD, FAB_HIDE_MS } from '../../lib/anchor';
+import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, FAB_HIDE_MS } from '../../lib/anchor';
 import { groupFormats } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
@@ -190,8 +190,17 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       const { clientX: x, clientY: y } = ev;
       requestAnimationFrame(() => {
         moveQueued = false;
+        // Phần tử neo có thể đã bị player thay mất (SPA dựng lại <video> sau khi
+        // bắt đầu tải). Node rời DOM trả rect toàn số 0 mà không báo gì, nên
+        // nếu cứ tin vào nó thì nút ẩn vĩnh viễn. Thấy rect hỏng thì neo lại.
+        if (anchored && (!anchored.isConnected || !isUsableRect(anchored.getBoundingClientRect()))) {
+          place();
+        }
         const rects = [];
-        if (anchored) rects.push(anchored.getBoundingClientRect());
+        if (anchored) {
+          const r = anchored.getBoundingClientRect();
+          if (isUsableRect(r)) rects.push(r);
+        }
         if (!fab.classList.contains('sl-hidden')) rects.push(fab.getBoundingClientRect());
         // Vùng đệm bằng cả nút + lề: nút nằm NGOÀI mép trên video, nên đường đi
         // từ video lên tới nút không được tính là "đã rời video".
@@ -362,7 +371,10 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         // (nó sống chung shadow host với panel), mà nút phải còn đó để mở lại.
         mounted = false;
         root.style.display = 'none';
-        setHover(false);
+        // KHÔNG gọi setHover(false): con trỏ vẫn đang ở trên video, nói dối là
+        // nó đã rời đi sẽ hẹn giờ ẩn nút trong khi người dùng vẫn đang trỏ vào.
+        // Cứ để lần mousemove tới quyết định theo vị trí thật.
+        applyFabVisibility();
       };
       head.append(logo, title, close);
 
@@ -464,7 +476,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         mounted = false;
         setPending(false); // mở lại panel lần sau phải bấm được ngay, không kẹt
         root.style.display = 'none';
-        setHover(false); // panel đóng thì nút bắt đầu đếm giờ ẩn
+        applyFabVisibility(); // vị trí chuột thật quyết định, không ép trạng thái
       }
 
       // Nạp danh sách chất lượng ngay — người dùng chọn TRƯỚC khi bàn giao, đúng

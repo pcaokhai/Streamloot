@@ -1,4 +1,4 @@
-import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX, PANEL_W, PANEL_GAP, FAB_HIDE_MS } from '../.tmp-anchor.mjs';
+import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX, PANEL_W, PANEL_GAP, FAB_HIDE_MS } from '../.tmp-anchor.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -78,6 +78,11 @@ t('con trỏ ngoài video thì không', () => isOverRect({ x: 50, y: 50 }, VID),
 t('sát mép vẫn tính là trên video', () => isOverRect({ x: 200, y: 100 }, VID), true);
 t('ngoài mép một chút nhưng trong vùng đệm thì vẫn tính', () => isOverRect({ x: 195, y: 100 }, VID, 8), true);
 t('không có vùng nào thì luôn false', () => isOverRect({ x: 1, y: 1 }, []), false);
+
+// --- phần tử rời DOM: rect toàn số 0, không được coi là vùng hợp lệ ---
+t('rect của node đã rời DOM không dùng được', () => isUsableRect({ top: 0, left: 0, width: 0, height: 0 }), false);
+t('rect thật thì dùng được', () => isUsableRect({ top: 10, left: 10, width: 640, height: 360 }), true);
+t('cao bằng 0 cũng không dùng được', () => isUsableRect({ top: 0, left: 0, width: 640, height: 0 }), false);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
