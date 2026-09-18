@@ -81,22 +81,6 @@ function errorText(e: unknown): string {
   return e instanceof BackendError ? e.message : 'Lỗi không xác định';
 }
 
-/** Đọc stream tiến trình rồi chuyển tiếp về tab đã yêu cầu tải. */
-async function pumpProgress(taskId: string, tabId?: number): Promise<void> {
-  if (tabId === undefined) return;
-  try {
-    await api.streamProgress(taskId, (event) => {
-      browser.tabs.sendMessage(tabId, { type: 'progress', taskId, event }).catch(() => {
-        // Tab đã đóng hoặc điều hướng đi — dừng im lặng, không phải lỗi.
-      });
-    });
-  } catch (e) {
-    browser.tabs
-      .sendMessage(tabId, { type: 'progress', taskId, error: errorText(e) })
-      .catch(() => {});
-  }
-}
-
 /** Origin của frame khởi tạo request — 2/3 site đích phục vụ stream qua iframe. */
 function pageOf(d: { initiator?: string; documentUrl?: string }): string {
   const raw = d.initiator ?? d.documentUrl;
@@ -192,13 +176,9 @@ export default defineBackground(() => {
     }
 
     if (m?.type === 'startDownload' && m.info) {
-      const tabId = sender.tab?.id;
       return api
         .startDownload(m.info, m.formatId ?? null)
         .then(({ task_id }) => {
-          // Stream ở background rồi đẩy từng sự kiện về tab. Content script
-          // không tự stream được, cùng lý do Origin ở trên.
-          void pumpProgress(task_id, tabId);
           // Đánh thức vòng poll.
           //
           // nextPollMs trả null khi không còn task, nên trước cú tải này vòng
@@ -220,11 +200,9 @@ export default defineBackground(() => {
     }
 
     if (m?.type === 'startByUrl' && typeof m.url === 'string') {
-      const tabId = sender.tab?.id;
       return api
         .startDownloadByUrl(m.url, m.formatId ?? null)
         .then(({ task_id }) => {
-          void pumpProgress(task_id, tabId);
           runTick();
           return { ok: true as const, taskId: task_id };
         })

@@ -1,6 +1,5 @@
 import { loadSettings } from './settings';
-import type { FormatOption, ProgressEvent, StartResult, VideoInfoPayload, TaskRecord, HistoryRow } from './types';
-import { TERMINAL_STATUSES } from './types';
+import type { FormatOption, StartResult, VideoInfoPayload, TaskRecord, HistoryRow } from './types';
 
 /** Backend chỉ bind 127.0.0.1 (ADR 0004) — không bao giờ gọi ra ngoài máy. */
 async function baseUrl(): Promise<string> {
@@ -199,53 +198,6 @@ export function getFormatsByUrl(url: string): Promise<{ title: string; formats: 
  */
 export function startDownloadByUrl(url: string, formatId: string | null): Promise<StartResult> {
   return post<StartResult>('/downloads', { url, ...(formatId ? { format_id: formatId } : {}) });
-}
-
-/**
- * Đọc tiến trình.
- *
- * Dùng `fetch` + `ReadableStream` chứ KHÔNG dùng `EventSource`: MV3 service
- * worker không có `EventSource`. Đổi lại được thứ tốt hơn — với `fetch`, Chrome
- * gửi kèm `Origin`, nên backend nhận diện được extension và ta không cần token
- * dùng-một-lần; nối lại stream bao nhiêu lần cũng được (ADR 0005 §6.3.1).
- */
-export async function streamProgress(
-  taskId: string,
-  onEvent: (e: ProgressEvent) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  const res = await fetch(`${await baseUrl()}/downloads/${taskId}/stream`, {
-    headers: jsonHeaders(),
-    signal,
-  });
-  if (!res.ok || !res.body) throw new BackendError(`Stream trả ${res.status}`, res.status);
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) return;
-    buffer += decoder.decode(value, { stream: true });
-
-    // Khung SSE phân tách bằng dòng trống. Phải gom buffer chứ không xử lý từng
-    // chunk: một sự kiện có thể bị cắt ngang giữa hai lần đọc.
-    const frames = buffer.split('\n\n');
-    buffer = frames.pop() ?? '';
-
-    for (const frame of frames) {
-      const line = frame.split('\n').find((l) => l.startsWith('data:'));
-      if (!line) continue;
-      try {
-        const data = JSON.parse(line.slice(5).trim()) as ProgressEvent;
-        onEvent(data);
-        if (TERMINAL_STATUSES.has(data.status)) return;
-      } catch {
-        // Khung hỏng thì bỏ qua, đừng giết cả stream vì một sự kiện lỗi.
-      }
-    }
-  }
 }
 
 /**
