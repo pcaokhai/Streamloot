@@ -378,3 +378,60 @@ thành rendition riêng: cả ba biến thể hình đều `acodec: none`, tiế
 **Bài học.** Bản sửa YouTube trước đó chỉ vá một đường (đọc từ trang). Cùng một
 lỗi tồn tại ở hai đường còn lại mà không ai kiểm — sửa một triệu chứng không
 phải sửa nguyên nhân. Lần này grep cả ba đường sinh `format_id`.
+
+## Bug 19. Bắt trúng biến thể thay vì master → file chỉ có tiếng (hoặc chỉ có hình)
+
+**Triệu chứng.** Cùng một site, hai video: một cái tải về đủ tiếng lẫn hình,
+cái kia chỉ có tiếng. Đã sửa Bug 18 rồi mà vẫn còn.
+
+**Quá trình gỡ — dữ liệu, không giả thuyết.**
+
+Giả thuyết đầu tiên của tôi: bản `.app` đang chạy chưa có bản sửa Bug 18. **Sai**
+— app build lúc 00:05, commit sửa lúc 23:59.
+
+Giả thuyết thứ hai: hai link có cấu trúc format khác nhau. **Sai** — `yt-dlp -J`
+cho thấy cả hai giống hệt: ba biến thể hình `acodec: none` + một rendition tiếng.
+
+Chạy chính code đã sửa trên link hỏng: trả đúng `hls-1324+bestaudio/hls-1324`.
+Vậy code đúng — lỗi ở chỗ khác.
+
+Đọc DB thật của app (`~/Library/Application Support/Streamloot/db/history.db`,
+không phải `db/` trong repo):
+
+| id | lúc | `m3u8_url` đã dùng | `format_id` | kết quả |
+|---|---|---|---|---|
+| 21 | 23:45 | `playlist_aac128.m3u8` | best | chỉ tiếng |
+| 22 | 23:48 | `playlist_720p.m3u8` | best | chỉ hình |
+| 25 | 00:08 | `master.m3u8` | best | **đủ cả hai** |
+| 24 | 00:08 | `playlist_aac128.m3u8` | best | chỉ tiếng |
+
+Bốn dòng này trả lời trọn vẹn.
+
+**Nguyên nhân.** Extension bắt được **bất kỳ playlist nào player yêu cầu** — có
+khi master, có khi một biến thể. `pickCapture` xếp hạng theo **thời lượng**, mà
+playlist tiếng và playlist hình **dài bằng nhau** → chọn trúng cái nào là tuỳ
+may. Bản sửa Bug 18 (`hasSeparateAudio`) chỉ cứu được khi bắt trúng master.
+
+**Vì sao không tầng nào bên dưới cứu được.** Tải một biến thể là tải đúng một
+nửa, và URL nửa kia **đã mất** từ lúc chọn capture. Backend nhận `m3u8_url` là
+playlist tiếng thì dù có `+bestaudio` cũng không có hình để ghép.
+
+**Sửa.** `siblingMasterUrl()`: khi playlist tải về không phải master, thử
+`master.m3u8` cùng thư mục (quy ước áp đảo của HLS) và dùng nó nếu đúng là
+master. Đoán sai chỉ tốn một request 404.
+
+**Đánh đổi — bỏ một lối tắt vừa thêm hôm qua.** Trước đây media playlist trả một
+dòng "Chất lượng gốc" để khỏi phải hỏi backend. Bỏ hẳn: không phân biệt được
+"playlist đã gộp sẵn tiếng" với "một nửa của luồng tách", mà đoán sai thì người
+dùng nhận file hỏng. Giờ tìm không ra master thì trả `null` → lùi về backend, ở
+đó yt-dlp nhìn từ URL trang nên thấy đủ. Chậm hơn, đúng hơn.
+
+Gỡ luôn `singleFormat`/`isLive`/`totalDuration` — chúng chỉ phục vụ lối tắt đó.
+
+**Bài học.** Bug 18 và 19 là **cùng một triệu chứng, hai nguyên nhân khác nhau**
+ở hai tầng khác nhau. Sửa xong tầng trên mà không kiểm lại bằng dữ liệu thật thì
+tưởng đã xong. Thứ chốt được vụ này là **đọc DB của app**, không phải đọc code.
+
+**Ghi chú phụ phát hiện trong lúc gỡ.** Bộ test đang ghi fixture (`Sample`,
+`example.com`) vào `db/history.db` **thật** của repo. Không ảnh hưởng app (app
+dùng DB trong Application Support) nhưng vẫn là test làm bẩn dữ liệu — nên tách.

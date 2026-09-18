@@ -17,7 +17,7 @@ import { applyIconState, flashCompleted } from '../lib/icon';
 import { cacheTasks } from '../lib/cache';
 import { nextPollMs, pickRingTask, shouldCacheFormatFailure } from '../lib/tasks';
 import { canSetHeaders, dirFilter, withHeaders } from '../lib/dnr';
-import { hasSeparateAudio, isLive, isMaster, isSubtitlePlaylist, parseMaster, singleFormat, totalDuration, variantsToFormats } from '../lib/m3u8';
+import { hasSeparateAudio, isMaster, isSubtitlePlaylist, parseMaster, siblingMasterUrl, variantsToFormats } from '../lib/m3u8';
 import type { Capture, FormatOption, TaskRecord, VideoInfoPayload } from '../lib/types';
 
 const MANIFEST_URL = /\.(m3u8|mpd)(\?|$)/i;
@@ -248,52 +248,70 @@ export default defineBackground(() => {
 /** Quá ngưỡng này thì bỏ đường nhanh, lùi về backend. */
 const MANIFEST_TIMEOUT_MS = 4000;
 
+/** Tải một playlist kèm Referer. `null` khi không lấy được. */
+async function fetchManifest(
+  url: string,
+  headers: Record<string, string>,
+): Promise<string | null> {
+  try {
+    return await withHeaders([{ urlFilter: dirFilter(url), headers }], async () => {
+      // Hạn giờ BẮT BUỘC: `fetch` không tự bỏ cuộc, mà CDN video treo request
+      // là chuyện thường. Không có nó thì panel đứng ở "Đang lấy danh sách…"
+      // vô hạn thay vì lùi về backend sau vài giây.
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), MANIFEST_TIMEOUT_MS);
+      try {
+        const res = await fetch(url, { credentials: 'omit', signal: ctl.signal });
+        if (!res.ok) throw new Error(`manifest trả ${res.status}`);
+        return await res.text();
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+  } catch (err) {
+    console.warn('[Streamloot] không đọc được manifest', url, err);
+    return null;
+  }
+}
+
 async function variantsFromManifest(info: VideoInfoPayload): Promise<FormatOption[] | null> {
   if (!canSetHeaders() || !info.m3u8_url) return null;
   const headers: Record<string, string> = {};
   if (info.referer) headers.Referer = info.referer;
   if (info.origin) headers.Origin = info.origin;
 
-  let text: string;
-  try {
-    text = await withHeaders(
-      [{ urlFilter: dirFilter(info.m3u8_url), headers }],
-      async () => {
-        // Hạn giờ BẮT BUỘC: `fetch` không tự bỏ cuộc, mà CDN video treo request
-        // là chuyện thường. Không có nó thì panel đứng ở "Đang lấy danh sách…"
-        // vô hạn thay vì lùi về backend sau vài giây.
-        const ctl = new AbortController();
-        const timer = setTimeout(() => ctl.abort(), MANIFEST_TIMEOUT_MS);
-        try {
-          const res = await fetch(info.m3u8_url, { credentials: 'omit', signal: ctl.signal });
-          if (!res.ok) throw new Error(`manifest trả ${res.status}`);
-          return await res.text();
-        } finally {
-          clearTimeout(timer);
-        }
-      },
-    );
-  } catch (err) {
-    console.warn('[Streamloot] đọc manifest trong extension hỏng, lùi về backend:', err);
-    return null;
-  }
+  let url = info.m3u8_url;
+  let text = await fetchManifest(url, headers);
+  if (text === null) return null;
 
   // Playlist phụ đề cũng là .m3u8 hợp lệ — mời tải nó là đưa người dùng một
   // tệp .vtt và gọi đó là video.
   if (isSubtitlePlaylist(text)) return null;
+
   if (!isMaster(text)) {
-    // Media playlist: không có biến thể để chọn, nhưng vẫn tải được. Trả một
-    // dòng thay vì lùi về backend — backend cũng chỉ trả đúng một lựa chọn cho
-    // luồng này, mà lại bắt đợi yt-dlp và đòi app phải đang chạy.
-    return totalDuration(text) !== null || isLive(text)
-      ? [singleFormat(info.m3u8_url, totalDuration(text))]
-      : null;
+    // Bắt được BIẾN THỂ chứ không phải master.
+    //
+    // Đo thật (DB app, 19/09): cùng một trang, lần bắt `master.m3u8` thì file ra
+    // đủ tiếng lẫn hình, lần bắt `playlist_aac128.m3u8` thì file chỉ có tiếng.
+    // Xếp hạng capture theo thời lượng không cứu được: playlist tiếng và
+    // playlist hình dài BẰNG NHAU, nên chọn trúng cái nào là tuỳ may.
+    //
+    // Tải một biến thể là tải đúng một nửa, và không tầng nào bên dưới ghép lại
+    // được vì URL nửa kia đã mất. Nên phải tìm master TRƯỚC.
+    const candidate = siblingMasterUrl(url);
+    const masterText = candidate ? await fetchManifest(candidate, headers) : null;
+    if (candidate && masterText !== null && isMaster(masterText)) {
+      url = candidate;
+      text = masterText;
+    } else {
+      // Không tìm được master: luồng này có thể thật sự chỉ có một playlist
+      // (đã gộp sẵn tiếng), mà cũng có thể là một nửa. Không phân biệt được thì
+      // KHÔNG đoán — lùi về backend, ở đó yt-dlp nhìn từ URL trang nên thấy đủ.
+      return null;
+    }
   }
-  const formats = variantsToFormats(
-    parseMaster(text, info.m3u8_url),
-    hasSeparateAudio(text),
-    info.m3u8_url,
-  );
+
+  const formats = variantsToFormats(parseMaster(text, url), hasSeparateAudio(text), url);
   return formats.length ? formats : null;
 }
 

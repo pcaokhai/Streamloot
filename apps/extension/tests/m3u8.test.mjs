@@ -1,4 +1,4 @@
-import { parseMaster, variantsToFormats, isMaster, isSubtitlePlaylist, isLive, totalDuration, singleFormat, hasSeparateAudio } from '../.tmp-m3u8.mjs';
+import { parseMaster, variantsToFormats, isMaster, isSubtitlePlaylist, hasSeparateAudio, siblingMasterUrl } from '../.tmp-m3u8.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -40,11 +40,6 @@ t('master có STREAM-INF', () => isMaster(MASTER), true);
 t('media playlist không phải master', () => isMaster(MEDIA), false);
 t('playlist toàn .vtt là phụ đề, không phải video', () => isSubtitlePlaylist(SUBS), true);
 t('playlist .ts không phải phụ đề', () => isSubtitlePlaylist(MEDIA), false);
-t('không có ENDLIST là luồng trực tiếp', () => isLive(LIVE), true);
-t('có ENDLIST là VOD', () => isLive(MEDIA), false);
-t('master không bị coi là live', () => isLive(MASTER), false);
-t('cộng thời lượng segment', () => totalDuration(MEDIA), 12.509);
-t('không có EXTINF thì null, không phải 0', () => totalDuration(MASTER), null);
 
 // --- biến thể ---
 const vs = parseMaster(MASTER, BASE);
@@ -77,16 +72,6 @@ const nf = variantsToFormats(parseMaster(NORES, BASE));
 t('thiếu RESOLUTION vẫn suy được cấp từ bandwidth', () => nf.map((f) => f.height), [720, 360]);
 t('thiếu RESOLUTION vẫn chọn được dòng tốt nhất', () => nf.map((f) => f.recommended), [true, false]);
 
-// --- media playlist: một dòng, không cần backend ---
-t('một luồng vẫn ra được dòng bấm được',
-  () => { const f = singleFormat('https://cdn.example.test/v.m3u8', 125); return [f.url, f.recommended, f.vcodec]; },
-  ['https://cdn.example.test/v.m3u8', true, 'avc1']);
-t('không đo được thời lượng thì để trống, không bịa',
-  () => singleFormat('https://cdn.example.test/v.m3u8', null).resolution, '');
-t('hình dạng khớp FormatOption',
-  () => Object.keys(singleFormat('https://x.example.test/a.m3u8', 60)).sort(),
-  ['acodec', 'ext', 'filesize', 'format_id', 'height', 'recommended', 'resolution', 'url', 'vcodec'].sort());
-
 // --- tiếng ở rendition riêng: URL biến thể là hình CÂM ---
 const SEP = `#EXTM3U
 #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="vi",URI="aud/i.m3u8"
@@ -102,6 +87,20 @@ t('tách tiếng thì dùng bộ chọn theo chiều cao để yt-dlp ghép',
 t('master gộp sẵn thì vẫn gửi thẳng URL biến thể (nhanh hơn)',
   () => variantsToFormats(parseMaster(MASTER, BASE), false, BASE)[0].url,
   'https://cdn.example.test/dir/360p/index.m3u8');
+
+// --- bắt trúng biến thể thay vì master: phải tìm lại master ---
+t('biến thể tiếng -> master cùng thư mục',
+  () => siblingMasterUrl('https://cdn.example.test/v/49/playlist_aac128.m3u8'),
+  'https://cdn.example.test/v/49/master.m3u8');
+t('biến thể hình -> master cùng thư mục',
+  () => siblingMasterUrl('https://cdn.example.test/v/49/playlist_720p.m3u8'),
+  'https://cdn.example.test/v/49/master.m3u8');
+t('đã là master thì không tìm nữa',
+  () => siblingMasterUrl('https://cdn.example.test/v/49/master.m3u8'), null);
+t('giữ nguyên query khi dựng đường dẫn anh em',
+  () => siblingMasterUrl('https://cdn.example.test/v/49/playlist_720p.m3u8?tok=1'),
+  'https://cdn.example.test/v/49/master.m3u8');
+t('URL rác thì null, không ném', () => siblingMasterUrl('không-phải-url'), null);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

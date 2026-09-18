@@ -72,15 +72,6 @@ export function isSubtitlePlaylist(text: string): boolean {
   return segs.every((u) => SUBTITLE_EXT.test(u.split(/[?#]/)[0].split('.').pop() ?? ''));
 }
 
-/**
- * Luồng trực tiếp: không có #EXT-X-ENDLIST.
- *
- * Quan trọng vì tải một luồng live là tải mãi không dừng — người dùng phải
- * biết trước, chứ không phải phát hiện khi ổ đĩa đầy.
- */
-export function isLive(text: string): boolean {
-  return !isMaster(text) && segmentUris(text).length > 0 && !/^#EXT-X-ENDLIST/m.test(text);
-}
 
 function segmentUris(text: string): string[] {
   const lines = text.split(/\r?\n/).map((l) => l.trim());
@@ -93,13 +84,6 @@ function segmentUris(text: string): string[] {
   return out;
 }
 
-/** Tổng thời lượng (giây) của media playlist; `null` khi không đo được. */
-export function totalDuration(text: string): number | null {
-  const nums = [...text.matchAll(/#EXTINF:\s*([\d.]+)/gi)].map((m) => parseFloat(m[1]));
-  if (!nums.length || nums.some((n) => !Number.isFinite(n))) return null;
-  const sum = nums.reduce((a, b) => a + b, 0);
-  return sum > 0 ? sum : null;
-}
 
 /** Các biến thể trong master playlist. Rỗng khi không phải master. */
 export function parseMaster(text: string, baseUrl: string): Variant[] {
@@ -187,23 +171,28 @@ export function variantsToFormats(
   });
 }
 
+
 /**
- * Một dòng duy nhất cho media playlist (không có biến thể để chọn).
+ * URL master "anh em" của một media playlist, hoặc `null` nếu không đoán được.
  *
- * Vẫn hơn là lùi về backend: backend chỉ trả đúng một lựa chọn cho cùng luồng
- * này, mà lại bắt người dùng đợi yt-dlp — và nếu app chưa chạy thì không có gì
- * để hiện cả. Thời lượng đọc ngay từ playlist nên nhãn vẫn nói được điều có ích.
+ * Vì sao cần: extension bắt được BẤT KỲ playlist nào player yêu cầu — có khi là
+ * master, có khi chỉ là một biến thể. Mà xếp hạng capture theo thời lượng thì
+ * không phân biệt nổi playlist tiếng với playlist hình: chúng dài bằng nhau.
+ * Đo thật (DB app, 19/09): cùng một trang, lần thì bắt `master.m3u8` (ra file
+ * đủ tiếng lẫn hình), lần thì bắt `playlist_aac128.m3u8` (ra file chỉ có tiếng).
+ *
+ * Tải một biến thể là tải đúng MỘT nửa — không cách nào ghép lại ở tầng dưới,
+ * vì URL kia đã mất. Nên phải tìm lại master TRƯỚC khi tải.
+ *
+ * `master.m3u8` cạnh các biến thể là quy ước áp đảo của HLS. Đoán sai thì chỉ
+ * tốn một request 404 và ta đi đường cũ — không hỏng gì.
  */
-export function singleFormat(url: string, durationSec: number | null): import('./types').FormatOption {
-  return {
-    format_id: '',
-    ext: 'mp4',
-    resolution: durationSec ? `${Math.round(durationSec / 60)} phút` : '',
-    height: null,
-    filesize: null,
-    vcodec: 'avc1',
-    acodec: 'mp4a',
-    recommended: true,
-    url,
-  };
+export function siblingMasterUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (/\/master\.m3u8$/i.test(u.pathname)) return null; // đã là master rồi
+    return new URL('master.m3u8', u).href;
+  } catch {
+    return null;
+  }
 }
