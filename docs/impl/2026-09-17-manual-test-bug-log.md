@@ -484,3 +484,21 @@ Chấp nhận được vì sự kiện `completed` sau `process.wait()` mới l�
 **Bài học.** "Chậm hơn" là triệu chứng, không phải nguyên nhân. Nghi phạm đầu
 tiên (cache vừa thêm) là nghi phạm **sai**; thứ chỉ đúng chỗ là đếm dòng output
 thật và đếm số lần ghi DB.
+
+## Ghi nhận 21. Facebook đã tải được (19/09)
+
+**Kết quả thử tay.** Nút nổi hiện đúng vị trí trên video Facebook, và tải được
+video qua đường progressive — **không đụng backend**, đúng mục tiêu "chạy được
+khi app chưa mở".
+
+**Một hành vi cần biết trước, không phải lỗi.** Video trong **comment** chỉ tải
+được sau khi bấm mở cho nó phát. Facebook nạp dữ liệu comment theo nhu cầu, nên
+lúc trang vừa tải thì manifest của video đó chưa có trong payload.
+
+Điều này **khác** với quan sát trên trang permalink hôm trước (12 manifest / 3
+thẻ `<video>` — tức video comment nằm sẵn). Cả hai quan sát đều đúng, chỉ khác
+loại trang. Ghi vào ADR 0007 §5.1.
+
+**Bài học.** Một phép đo trên MỘT loại trang không kết luận được cho mọi loại
+trang. Kết luận "payload mang sẵn video trong comment" của tôi hôm trước đúng
+với trang permalink và sai với trang feed — đúng ra phải ghi kèm phạm vi đo.

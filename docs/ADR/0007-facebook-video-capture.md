@@ -188,11 +188,34 @@ dựng với `example.test`.
 
 ---
 
-## 5. Chưa xác minh
+## 5. Trạng thái xác minh
 
-| # | Điều chưa chắc | Sẽ lộ ra khi |
+Cập nhật sau vòng thử tay 19/09.
+
+| # | Điều cần chắc | Trạng thái |
 |---|---|---|
-| U1 | Progressive URL **thật sự có tiếng** — suy từ lược đồ Facebook, chưa mở được file vì cần phiên đăng nhập | Thử tải thật |
-| U2 | Cửa sổ 6 KB có đủ bắt `length_in_second` cho mọi video không (đo: 1/3) | Thử trên nhiều trang |
-| U3 | Video trong comment có nằm trong payload ở **mọi** loại trang không, hay chỉ trang permalink | Thử trên feed chính |
-| U4 | URL progressive sống được bao lâu (có chữ ký, hết hạn) | Thử tải sau vài phút |
+| U1 | Progressive URL tải được thành file | **ĐÚNG** — người dùng tải được video Facebook qua đường này |
+| U1b | File tải về **có tiếng** | **CHƯA HỎI RÕ** — cần nghe thử một file |
+| U2 | Cửa sổ 6 KB đủ bắt `length_in_second` | **MỘT PHẦN** — đo 1/3 video. Thiếu thời lượng không chặn tải |
+| U3 | Video trong comment nằm sẵn trong payload | **KHÔNG PHẢI LÚC NÀO CŨNG** — xem §5.1 |
+| U4 | URL progressive sống được bao lâu | Chưa đo |
+
+### 5.1. Video trong comment chỉ vào payload sau khi mở
+
+Hai quan sát **khác nhau**, và cả hai đều đúng:
+
+| Loại trang | Video trong comment |
+|---|---|
+| Trang permalink (bài riêng lẻ) | Nằm sẵn trong payload — đo được 12 manifest / 3 thẻ `<video>` |
+| Trang feed (trang doanh nghiệp) | **Chưa** có trong payload; phải bấm mở video đó lên cho nó phát thì mới tải được |
+
+Facebook nạp dữ liệu comment theo nhu cầu, nên trên feed thì manifest của video
+trong comment chưa có lúc trang vừa tải.
+
+**Quyết định: chấp nhận, không đi moi thêm.** Lấy được nó sớm hơn thì phải tự
+gọi API nội bộ của Facebook — mong manh, và là thứ mình không kiểm soát được khi
+họ đổi. Thao tác "bấm vào video trong comment rồi mới tải" là tự nhiên với người
+dùng, và panel nhận ra ngay sau đó.
+
+**Điều kiện xét lại:** nếu người dùng thường xuyên cần tải hàng loạt video trong
+comment mà không muốn mở từng cái, thì mới tính tới đường khác.
