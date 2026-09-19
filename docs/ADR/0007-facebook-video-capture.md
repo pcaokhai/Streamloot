@@ -212,10 +212,42 @@ Hai quan sát **khác nhau**, và cả hai đều đúng:
 Facebook nạp dữ liệu comment theo nhu cầu, nên trên feed thì manifest của video
 trong comment chưa có lúc trang vừa tải.
 
-**Quyết định: chấp nhận, không đi moi thêm.** Lấy được nó sớm hơn thì phải tự
-gọi API nội bộ của Facebook — mong manh, và là thứ mình không kiểm soát được khi
-họ đổi. Thao tác "bấm vào video trong comment rồi mới tải" là tự nhiên với người
-dùng, và panel nhận ra ngay sau đó.
+**Quyết định ban đầu (19/09, sáng): chấp nhận, không moi thêm.** Lý do nêu ra
+là muốn moi sớm thì phải tự gọi API nội bộ của Facebook — mong manh.
 
-**Điều kiện xét lại:** nếu người dùng thường xuyên cần tải hàng loạt video trong
-comment mà không muốn mở từng cái, thì mới tính tới đường khác.
+**ĐÃ ĐỔI (19/09, chiều) — xem D6.** Người dùng yêu cầu thử moi sớm, và lý do tôi
+đưa ra hoá ra **không đúng với cách làm khả dĩ nhất**: không cần gọi API nào của
+Facebook, chỉ cần QUAN SÁT response mà chính trang đã tự yêu cầu.
+
+### D6. Quan sát response của trang ở world MAIN
+
+Content script thường chạy ở world ISOLATED, nơi `window.fetch` là bản riêng —
+bọc ở đó không thấy request nào của trang. Nên thêm một content script chạy ở
+**world MAIN**, `document_start` (phải trước script của trang, nếu không trang đã
+giữ tham chiếu `fetch` gốc), bọc `fetch` và `XMLHttpRequest` để đọc **bản sao**
+response, rồi chuyển sang world ISOLATED bằng `postMessage`.
+
+**Ta chỉ đọc bản sao của thứ trang đã tự yêu cầu.** Không tự gọi API nào.
+
+**Nguyên tắc bất di bất dịch:** không bao giờ được làm hỏng trang. Mọi nhánh trả
+về đúng thứ bản gốc trả về; mọi lỗi của ta bị nuốt tại chỗ. `clone()` là bắt
+buộc — đọc thẳng response là tiêu mất body và trang nhận một stream đã cạn.
+
+**Ba lớp lọc trước khi tốn công**, vì đọc body mọi response là nhân đôi lưu lượng
+bộ nhớ của cả trang:
+
+| Lớp | Loại bỏ |
+|---|---|
+| `worthReading` — kiểu nội dung + kích thước | ảnh, video, response > 4 MB |
+| `looksRelevant` — tìm chuỗi dấu hiệu | mọi JSON không dính tới video |
+| `postMessage` chỉ khi đã qua hai lớp trên | tránh structured clone vô ích |
+
+**Đường lùi vẫn nguyên:** bấm mở video trong comment cho nó phát thì panel vẫn
+nhận ra như trước. D6 chỉ làm nó xuất hiện **sớm hơn**, không thay thế.
+
+**Rủi ro đã biết.** Bọc `fetch` của trang là can thiệp sâu nhất extension này
+từng làm. Hỏng ở đây không phải "không tải được" mà là "Facebook không chạy".
+Vì thế mọi thao tác đều bọc `try/catch` riêng và luôn trả bản gốc.
+
+**Điều kiện xét lại:** nếu thấy bất kỳ dấu hiệu nào trang bị ảnh hưởng, gỡ D6
+trước rồi mới tìm nguyên nhân — đường lùi vẫn dùng được.

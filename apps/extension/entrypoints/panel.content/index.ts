@@ -21,6 +21,8 @@ import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
 import { extractPlayerResponse, formatsFromPlayerResponse } from '../../lib/youtube';
 import { extractVideos } from '../../lib/facebook';
+import type { FbVideo } from '../../lib/facebook';
+import { mergeVideos } from '../../lib/netcapture';
 import { downloadName } from '../../lib/filename';
 
 /**
@@ -369,18 +371,45 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     }
 
     /**
+     * Video thấy được qua response của chính trang (netwatch.content, world MAIN).
+     *
+     * Facebook nạp comment sau khi trang tải, và dữ liệu đó không vào DOM — nên
+     * quét `innerHTML` không thấy video trong comment (ADR 0007 §5.1). Kho này
+     * gom chúng lại khi response về.
+     */
+    let netVideos: FbVideo[] = [];
+    const onNetBody = (ev: MessageEvent) => {
+      // Chỉ nhận tin của CHÍNH cửa sổ này: trang có thể postMessage tuỳ ý, và
+      // ta không được tin dữ liệu từ frame lạ.
+      if (ev.source !== window) return;
+      const d = ev.data as { tag?: string; body?: unknown };
+      if (d?.tag !== 'streamloot:net-body' || typeof d.body !== 'string') return;
+      try {
+        const found = extractVideos(d.body);
+        if (found.length) netVideos = mergeVideos(netVideos, found);
+      } catch (err) {
+        console.warn('[Streamloot] đọc response hỏng:', err);
+      }
+    };
+    window.addEventListener('message', onNetBody);
+    ctx.onInvalidated(() => window.removeEventListener('message', onNetBody));
+
+    /**
      * Video có URL file hoàn chỉnh nhúng sẵn trong HTML trang.
      *
      * Đọc `innerHTML` là dựng một chuỗi vài MB (trang Facebook đo được 7 MB),
      * nên CHỈ gọi khi người dùng mở panel — không gọi theo nhịp.
      */
-    function videosFromPage() {
+    function videosFromPage(): FbVideo[] {
+      let fromDom: FbVideo[] = [];
       try {
-        return extractVideos(document.documentElement.innerHTML);
+        fromDom = extractVideos(document.documentElement.innerHTML);
       } catch (err) {
         console.warn('[Streamloot] đọc video từ trang hỏng:', err);
-        return [];
       }
+      // DOM trước, mạng sau: bản trong HTML gốc thường đầy đủ hơn, và mergeVideos
+      // giữ bản CŨ khi trùng id.
+      return mergeVideos(fromDom, netVideos);
     }
 
     function render(root: HTMLElement) {
