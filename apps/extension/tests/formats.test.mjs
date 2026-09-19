@@ -85,11 +85,15 @@ const vf = (h, ext, size, rec = false) => ({
 t('bốn biến thể 1080p mp4 gộp còn một dòng',
   () => groupFormats([vf(1080, 'mp4', 100), vf(1080, 'mp4', 200), vf(1080, 'mp4', 300), vf(1080, 'mp4', 150)]).video.length,
   1);
-t('giữ bản NẶNG NHẤT — cùng độ phân giải thì nặng hơn là nét hơn',
+t('cùng đuôi thì giữ bản NẶNG NHẤT — nặng hơn là bitrate cao hơn, nét hơn',
   () => groupFormats([vf(1080, 'mp4', 100), vf(1080, 'mp4', 3 * 1024 * 1024)]).video[0].detail,
   'mp4 · 3.0 MB');
-t('khác đuôi thì KHÔNG gộp — người dùng phân biệt được',
-  () => groupFormats([vf(1080, 'mp4', 100), vf(1080, 'webm', 100)]).video.length, 2);
+t('khác đuôi VẪN gộp — thử tay: hai dòng "Full HD 1080p" cạnh nhau bị đọc là trùng',
+  () => groupFormats([vf(1080, 'mp4', 100), vf(1080, 'webm', 100)]).video.length, 1);
+t('giữ mp4 khi có cả hai — mở được ở mọi nơi',
+  () => groupFormats([vf(1080, 'webm', 999999), vf(1080, 'mp4', 100)]).video[0].ext, 'mp4');
+t('không có mp4 thì giữ webm chứ không bỏ mất mức đó',
+  () => groupFormats([vf(1080, 'webm', 100)]).video[0].ext, 'webm');
 t('khác chiều cao thì không gộp',
   () => groupFormats([vf(1080, 'mp4', 100), vf(720, 'mp4', 100)]).video.length, 2);
 t('dấu khuyên chọn không bị mất khi gộp',

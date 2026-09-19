@@ -109,33 +109,46 @@ function rowFor(f: FormatOption): FormatRow {
  * nhất trước.
  */
 /**
- * Gộp các dòng nhìn GIỐNG HỆT nhau.
+ * Gộp các dòng cùng một mức chất lượng.
  *
- * yt-dlp trả nhiều biến thể cùng một chiều cao — khác codec (avc1/vp9/av01),
- * khác fps, khác bitrate. Panel chỉ hiện chiều cao và đuôi file, nên chúng hiện
- * ra thành 4–6 dòng trông y như nhau và người dùng không có cơ sở nào để chọn.
+ * yt-dlp trả nhiều biến thể cùng chiều cao — khác container (mp4/webm), khác
+ * codec (avc1/vp9/av01), khác fps, khác bitrate. Hiện hết ra thì thành 6–8 dòng
+ * mà người dùng không có cơ sở nào để chọn giữa chúng.
  *
- * Gộp theo (chiều cao, đuôi), giữ bản NẶNG NHẤT — dung lượng lớn hơn ở cùng độ
- * phân giải nghĩa là bitrate cao hơn, tức nét hơn. Không biết dung lượng thì giữ
- * bản gặp trước, vì thứ tự yt-dlp trả đã là từ tốt xuống.
+ * Gộp theo CHIỀU CAO, không theo (chiều cao, đuôi). Bản đầu gộp theo cả đuôi vì
+ * tôi cho rằng "người dùng phân biệt được mp4 với webm" — thử tay cho thấy sai:
+ * hai dòng "Full HD 1080p" cạnh nhau vẫn bị đọc là trùng lặp. Với người tải
+ * video thì mức chất lượng mới là thứ cần chọn, còn container là chi tiết kỹ
+ * thuật.
+ *
+ * Ưu tiên: mp4 trước (mở được ở mọi nơi), rồi tới bản nặng hơn — cùng độ phân
+ * giải thì nặng hơn nghĩa là bitrate cao hơn, tức nét hơn.
  */
+function sizeOf(r: FormatRow): number {
+  const m = /([\d.]+)\s*(B|KB|MB|GB|TB)/.exec(r.detail);
+  if (!m) return -1;
+  const unit = { B: 0, KB: 1, MB: 2, GB: 3, TB: 4 }[m[2]] ?? 0;
+  return parseFloat(m[1]) * 1024 ** unit;
+}
+
+/** Bản nào đáng giữ hơn giữa hai dòng cùng mức chất lượng. */
+function better(a: FormatRow, b: FormatRow): FormatRow {
+  const mp4 = (r: FormatRow) => (r.ext === 'mp4' ? 1 : 0);
+  if (mp4(a) !== mp4(b)) return mp4(a) > mp4(b) ? a : b;
+  return sizeOf(a) >= sizeOf(b) ? a : b;
+}
+
 function dedupeRows(rows: FormatRow[]): FormatRow[] {
   const best = new Map<string, FormatRow>();
   for (const r of rows) {
-    const key = `${r.label}|${r.ext}`;
-    const cur = best.get(key);
+    const cur = best.get(r.label);
     if (!cur) {
-      best.set(key, r);
+      best.set(r.label, r);
       continue;
     }
-    const size = (x: FormatRow) => {
-      const m = /([\d.]+)\s*(B|KB|MB|GB|TB)/.exec(x.detail);
-      if (!m) return -1;
-      const unit = { B: 0, KB: 1, MB: 2, GB: 3, TB: 4 }[m[2]] ?? 0;
-      return parseFloat(m[1]) * 1024 ** unit;
-    };
-    if (size(r) > size(cur)) best.set(key, { ...r, recommended: r.recommended || cur.recommended });
-    else if (r.recommended) best.set(key, { ...cur, recommended: true });
+    const win = better(r, cur);
+    // Dấu khuyên chọn không được mất khi bản mang nó bị loại.
+    best.set(r.label, { ...win, recommended: win.recommended || r.recommended || cur.recommended });
   }
   return [...best.values()];
 }
