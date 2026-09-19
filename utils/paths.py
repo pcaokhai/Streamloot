@@ -80,9 +80,14 @@ def ensure_tool_path() -> None:
     # Thứ tự có ý nghĩa: bản nhúng (ta tự chọn) -> bản đã tải (ta tự tải, biết
     # phiên bản) -> Homebrew (không kiểm soát được). Thư mục tải nằm ở
     # user_data_dir vì bundle là chỉ-đọc sau khi ký.
+    # Thư mục công cụ nằm ở đường CỐ ĐỊNH của máy, không theo user_data_dir():
+    # hàm kia trả về gốc repo khi chạy từ source, mà công cụ thì bản dev và bản
+    # .app phải dùng chung. Viết thẳng ở đây thay vì import utils.tools để tránh
+    # import vòng (utils.tools đã import utils.paths).
+    machine_tools = Path.home() / "Library" / "Application Support" / APP_NAME / "tools"
     candidates = [
         str(bundled_bin_dir()),
-        str(user_data_dir() / "tools"),
+        str(machine_tools),
         "/opt/homebrew/bin",
         "/usr/local/bin",
     ]

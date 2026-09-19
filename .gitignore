@@ -22,6 +22,10 @@ plugins/*_private.py
 tests/*_private.py
 docs/**/*.private.md
 
+# Công cụ tải lúc chạy. tools_dir() giờ trỏ ra ngoài repo, dòng này chỉ là
+# lưới an toàn cho bản cũ đã lỡ tạo thư mục này.
+/tools/
+
 # macOS .app build artifacts
 /build/
 /dist/

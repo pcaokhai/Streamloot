@@ -27,6 +27,32 @@ class TestFfmpegAsset(unittest.TestCase):
         self.assertEqual(tools.ffmpeg_asset("mips"), "ffmpeg-darwin-x64")
 
 
+class TestToolsDirLocation(unittest.TestCase):
+    """
+    Thư mục công cụ phải nằm NGOÀI repo, kể cả khi chạy từ source.
+
+    Bản đầu dùng paths.user_data_dir(), mà hàm đó trả về gốc repo khi chạy từ
+    source — cài Chromium từ bản dev là nhét ~400MB vào dự án, và tải trùng một
+    lần nữa bản mà .app đã có.
+    """
+
+    def test_outside_the_repo(self):
+        repo = Path(__file__).resolve().parent.parent
+        self.assertNotIn(repo, tools.tools_dir().parents)
+
+    def test_same_place_for_dev_and_app(self):
+        """Bản dev và bản .app phải dùng chung, nếu không là tải hai lần."""
+        expected = Path.home() / "Library" / "Application Support" / "Streamloot" / "tools"
+        self.assertEqual(tools.tools_dir(), expected)
+
+    def test_on_path_after_ensure(self):
+        """Cài xong mà PATH không thấy thì coi như chưa cài."""
+        import os
+        from utils import paths
+        paths.ensure_tool_path()
+        self.assertIn(str(tools.tools_dir()), os.environ["PATH"])
+
+
 class TestFind(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

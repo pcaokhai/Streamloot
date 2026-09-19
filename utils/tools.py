@@ -41,8 +41,18 @@ class ToolStatus(NamedTuple):
 
 
 def tools_dir() -> Path:
-    """Nơi chứa công cụ tải về. Ghi được, nằm ngoài bundle chỉ-đọc."""
-    d = paths.user_data_dir() / "tools"
+    """
+    Nơi chứa công cụ tải về. LUÔN nằm ngoài repo, kể cả khi chạy từ source.
+
+    Cố ý KHÔNG dùng `paths.user_data_dir()`: hàm đó trả về gốc repo khi chạy từ
+    source (để `db/` và `logs/` của bản dev nằm ngay trong dự án). Với công cụ
+    thì như vậy sai ở hai điểm — nhét ~400 MB vào repo, và tải trùng một lần nữa
+    bản mà `.app` đã có.
+
+    Đây là công cụ của MÁY, không phải trạng thái của dự án: bản dev và bản
+    `.app` dùng chung một chỗ.
+    """
+    d = Path.home() / "Library" / "Application Support" / paths.APP_NAME / "tools"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
