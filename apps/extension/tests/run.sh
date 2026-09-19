@@ -15,8 +15,6 @@ node tests/anchor.test.mjs
 
 npx esbuild lib/m3u8.ts --bundle --format=esm --outfile=.tmp-m3u8.mjs --log-level=error
 node tests/m3u8.test.mjs
-npx esbuild lib/netcapture.ts --bundle --format=esm --outfile=.tmp-netcapture.mjs --log-level=error
-node tests/netcapture.test.mjs
 npx esbuild lib/filename.ts --bundle --format=esm --outfile=.tmp-filename.mjs --log-level=error
 node tests/filename.test.mjs
 npx esbuild lib/facebook.ts --bundle --format=esm --outfile=.tmp-facebook.mjs --log-level=error
@@ -27,4 +25,4 @@ npx esbuild lib/youtube.ts --bundle --format=esm --outfile=.tmp-youtube.mjs --lo
 node tests/youtube.test.mjs
 npx esbuild lib/submitGuard.ts --bundle --format=esm --outfile=.tmp-submitGuard.mjs --log-level=error
 node tests/submitGuard.test.mjs
-rm -f .tmp-netcapture.mjs .tmp-filename.mjs .tmp-facebook.mjs .tmp-dash.mjs .tmp-youtube.mjs .tmp-pick.mjs .tmp-tasks.mjs .tmp-formats.mjs .tmp-anchor.mjs .tmp-submitGuard.mjs .tmp-m3u8.mjs
+rm -f .tmp-filename.mjs .tmp-facebook.mjs .tmp-dash.mjs .tmp-youtube.mjs .tmp-pick.mjs .tmp-tasks.mjs .tmp-formats.mjs .tmp-anchor.mjs .tmp-submitGuard.mjs .tmp-m3u8.mjs

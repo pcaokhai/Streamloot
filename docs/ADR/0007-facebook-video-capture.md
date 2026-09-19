@@ -219,59 +219,58 @@ là muốn moi sớm thì phải tự gọi API nội bộ của Facebook — mo
 đưa ra hoá ra **không đúng với cách làm khả dĩ nhất**: không cần gọi API nào của
 Facebook, chỉ cần QUAN SÁT response mà chính trang đã tự yêu cầu.
 
-### D6. Quan sát response của trang ở world MAIN
+### D6. Quan sát response của trang ở world MAIN — ĐÃ THỬ, ĐÃ GỠ
 
-Content script thường chạy ở world ISOLATED, nơi `window.fetch` là bản riêng —
-bọc ở đó không thấy request nào của trang. Nên thêm một content script chạy ở
-**world MAIN**, `document_start` (phải trước script của trang, nếu không trang đã
-giữ tham chiếu `fetch` gốc), bọc `fetch` và `XMLHttpRequest` để đọc **bản sao**
-response, rồi chuyển sang world ISOLATED bằng `postMessage`.
+**Trạng thái: Rejected** (19/09, cùng ngày). Giữ mục này lại vì phép đo có giá
+trị lâu dài; đừng thử lại hướng này mà không đọc §D6-kết-quả.
 
-**Ta chỉ đọc bản sao của thứ trang đã tự yêu cầu.** Không tự gọi API nào.
+**Ý tưởng.** Facebook nạp comment sau khi trang tải. Content script chạy ở world
+ISOLATED không thấy `fetch` của trang, nên thêm một script ở world MAIN,
+`document_start`, bọc `fetch` và `XMLHttpRequest` để đọc **bản sao** response —
+chỉ quan sát thứ trang đã tự yêu cầu, không gọi API nào.
 
-**Nguyên tắc bất di bất dịch:** không bao giờ được làm hỏng trang. Mọi nhánh trả
-về đúng thứ bản gốc trả về; mọi lỗi của ta bị nuốt tại chỗ. `clone()` là bắt
-buộc — đọc thẳng response là tiêu mất body và trang nhận một stream đã cạn.
+#### D6-kết-quả: KHÔNG CÓ GÌ ĐỂ BẮT
 
-**Ba lớp lọc trước khi tốn công**, vì đọc body mọi response là nhân đôi lưu lượng
-bộ nhớ của cả trang:
+Đo bằng probe bọc đúng như code thật, chạy trong lúc mở rộng comment và cuộn:
 
-| Lớp | Loại bỏ |
-|---|---|
-| `worthReading` — kiểu nội dung + kích thước | ảnh, video, response > 4 MB |
-| `looksRelevant` — tìm chuỗi dấu hiệu | mọi JSON không dính tới video |
-| `postMessage` chỉ khi đã qua hai lớp trên | tránh structured clone vô ích |
+| Transport | Response quan sát được | Chứa `dash_manifests` / `progressive_url` / `playable_url` |
+|---|---|---|
+| `fetch` | **0** | 0 |
+| `XMLHttpRequest` | **16** | **0** |
 
-**Đường lùi vẫn nguyên:** bấm mở video trong comment cho nó phát thì panel vẫn
-nhận ra như trước. D6 chỉ làm nó xuất hiện **sớm hơn**, không thay thế.
+Response comment có `"comment"` và `"attachments"`, nhưng **không** mang dữ liệu
+phát. **Facebook chỉ lấy manifest đúng lúc người dùng bấm play.**
 
-**Rủi ro đã biết.** Bọc `fetch` của trang là can thiệp sâu nhất extension này
-từng làm. Hỏng ở đây không phải "không tải được" mà là "Facebook không chạy".
-Vì thế mọi thao tác đều bọc `try/catch` riêng và luôn trả bản gốc.
+Nên D6 không thể đạt mục tiêu của nó — không phải làm sai, mà là **không có dữ
+liệu nào tồn tại ở thời điểm đó để mà đọc**.
 
-**Điều kiện xét lại:** nếu thấy bất kỳ dấu hiệu nào trang bị ảnh hưởng, gỡ D6
-trước rồi mới tìm nguyên nhân — đường lùi vẫn dùng được.
+#### Vì sao gỡ thay vì giữ lại cho tương lai
 
-#### D6a. Bỏ bản bọc `XMLHttpRequest` (19/09, sau vòng thử tay)
+Bọc API của trang là can thiệp sâu nhất extension này từng có. Cái giá đã hiện ra
+ngay: `netwatch.js` xuất hiện trong ngăn xếp của một lỗi **do trang tự gây ra**
+(`chrome-extension://invalid/`), làm người dùng nghi oan và mất công điều tra.
+Giữ một thứ như vậy mà nó không đổi lại được gì là lỗ vốn thuần.
 
-Thử tay thấy trong Console: `GET chrome-extension://invalid/ net::ERR_FAILED`
-với `netwatch.js` trong ngăn xếp, ngay dưới là script của Facebook.
+Xác nhận vô can: gỡ bản bọc rồi cuộn lại cùng feed — lỗi vẫn còn. Nó có từ trước,
+do trang hoặc extension khác.
 
-**Điều tra cho thấy KHÔNG phải ta gây ra.** File build 1268 byte, không có một
-tham chiếu nào tới `chrome-extension`, `runtime.getURL` hay `import.meta`; ngăn
-xếp cho thấy chính trang gọi `send()` còn bản bọc chỉ nằm trên đường đi.
+#### Đường còn lại, nếu sau này thật sự cần
 
-**ĐÃ XÁC NHẬN bằng phép thử quyết định:** gỡ bản bọc `XMLHttpRequest` rồi cuộn
-lại cùng feed đó — lỗi **vẫn còn**. Nó có từ trước, do trang hoặc một extension
-khác (`chrome-extension://invalid/` là dấu hiệu kinh điển của content script bị
-mồ côi sau khi extension nào đó reload). Trước đây nó chỉ không mang tên ta.
+`attachments` trong response comment **có thể** mang `video_id` (chưa đo). Có id
+thì dựng được URL xem và nhờ backend + yt-dlp, **không cần manifest**. Nhưng
+đường đó vẫn phải bọc API của trang, tức trả lại đúng cái giá vừa từ chối — nên
+chỉ làm khi có nhu cầu thật, không làm sẵn.
 
-**Vẫn thu hẹp, vì lý do khác.** Bọc `send` làm tên file của ta xuất hiện trong
-ngăn xếp của lỗi người khác gây ra — nhận tiếng oan và làm nhiễu việc gỡ lỗi của
-người dùng. Facebook dùng `fetch` cho GraphQL nên bỏ XHR gần như không mất gì.
+#### Bài học
 
-Kèm theo: bản bọc `fetch` giờ **bỏ qua request không phải http(s)** — scheme
-khác không bao giờ mang dữ liệu ta cần.
+Quy tắc "thấy dấu hiệu trang bị ảnh hưởng thì gỡ trước, điều tra sau" đã cứu
+đúng một lần: nó buộc thu hẹp phạm vi ngay, và phép đo sau đó cho thấy toàn bộ
+hướng đi này không có cơ sở. Nếu điều tra trước rồi mới gỡ, chỗ can thiệp sâu
+nhất sẽ còn nằm đó thêm vài vòng nữa.
 
-**Nguyên tắc rút ra:** khi can thiệp vào API của trang, cái giá không chỉ là
-"có làm hỏng không" mà còn là "có bị quy oan không". Bề mặt càng hẹp càng tốt.
+Ngược lại, lần thu hẹp đó cũng gỡ nhầm đúng transport mang dữ liệu (`XMLHttpRequest`),
+làm phép đo kế tiếp ra `fetch: 0` và suýt dẫn tới kết luận sai. Bài học: khi thu
+hẹp vì lý do KHÔNG phải kỹ thuật, phải ghi rõ mình vừa bỏ mất khả năng quan sát gì.
+
+---
+
