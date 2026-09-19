@@ -150,3 +150,33 @@ export function deleteHistoryItem(id: number, deleteFile: boolean): Promise<unkn
 export function clearHistory(): Promise<unknown> {
   return request("/history", { method: "DELETE" });
 }
+
+export interface ToolInfo {
+  found: boolean;
+  source: "bundled" | "downloaded" | "system" | null;
+  required: boolean;
+}
+
+export interface ToolsResponse {
+  tools: Record<string, ToolInfo>;
+  installing: Record<string, { done: number; total: number; label: string; error: string | null }>;
+}
+
+export async function fetchTools(): Promise<ToolsResponse> {
+  const r = await request<ToolsResponse>("/tools");
+  // `request` trả null khi phản hồi rỗng. Với endpoint này thì rỗng là bất
+  // thường — trả một object rỗng giả sẽ hiện "chưa cài gì cả" và mời người dùng
+  // tải lại những thứ họ đã có.
+  if (!r) throw new Error("Backend trả về rỗng khi hỏi trạng thái công cụ");
+  return r;
+}
+
+export async function installTool(
+  name: string,
+): Promise<{ started: boolean; message?: string }> {
+  const r = await request<{ started: boolean; message?: string }>(
+    `/tools/${encodeURIComponent(name)}/install`,
+    { method: "POST" },
+  );
+  return r ?? { started: false };
+}

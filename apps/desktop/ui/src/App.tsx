@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { initApi, getHistory, revealInFinder, pathExists, deleteHistoryItem, clearHistory } from "./api";
+import { initApi, getHistory, revealInFinder, pathExists, deleteHistoryItem, clearHistory, fetchTools } from "./api";
 import { useTasks } from "./hooks/useTasks";
 import { useFormatPicker, formatSelectorForHeight } from "./hooks/useFormatPicker";
 import { useContextMenu, type RowContext } from "./hooks/useContextMenu";
 import { Sidebar, type View } from "./components/Sidebar";
+import { ToolsPanel } from "./components/ToolsPanel";
 import { Toolbar } from "./components/Toolbar";
 import { DownloadsTable } from "./components/DownloadsTable";
 import { HistoryTable } from "./components/HistoryTable";
@@ -29,6 +30,16 @@ async function copyToClipboard(text: string): Promise<void> {
 
 export default function App() {
   const [view, setView] = useState<View>("downloads");
+  // Thiếu công cụ BẮT BUỘC thì phải thấy được ngay ở sidebar — không đợi người
+  // dùng mò vào Cài đặt rồi mới biết vì sao mọi lượt tải đều hỏng.
+  const [toolsNeedAttention, setToolsNeedAttention] = useState(false);
+  useEffect(() => {
+    fetchTools()
+      .then((d) => setToolsNeedAttention(
+        Object.values(d.tools).some((t) => t.required && !t.found),
+      ))
+      .catch(() => setToolsNeedAttention(false)); // không hỏi được thì đừng doạ người dùng
+  }, []);
   const [urlInput, setUrlInput] = useState("");
   const [filter, setFilter] = useState("");
   const [resolution, setResolution] = useState("");
@@ -155,6 +166,7 @@ export default function App() {
         downloadingCount={downloadingCount}
         needsAttentionCount={needsAttentionCount}
         historyCount={history.length}
+        toolsNeedAttention={toolsNeedAttention}
       />
 
       <main className="content">
@@ -177,7 +189,9 @@ export default function App() {
         />
 
         <section className="view">
-          {view === "downloads" ? (
+          {view === "settings" ? (
+            <ToolsPanel />
+          ) : view === "downloads" ? (
             <>
               <DownloadsTable tasks={visibleTasks} onContextMenu={openMenu} />
               {taskEntries.length === 0 && <EmptyState />}

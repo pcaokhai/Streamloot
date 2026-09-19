@@ -4,16 +4,22 @@ set -euo pipefail
 # =============================================================================
 # Streamloot — macOS .app build
 #
-#   ./build_app.sh                 build dist/Streamloot.app
+#   ./build_app.sh                 build dist/Streamloot.app (~45MB, KHÔNG nhúng binary)
 #   ./build_app.sh --clean         wipe build/ dist/ vendor/ first
-#   ./build_app.sh --no-ffmpeg     skip vendoring ffmpeg (falls back to PATH)
-#   ./build_app.sh --no-chromium   skip vendoring Chromium (~300MB smaller)
+#   ./build_app.sh --with-ytdlp    nhúng yt-dlp (+35MB)
+#   ./build_app.sh --with-ffmpeg   nhúng ffmpeg (+43MB)
+#   ./build_app.sh --with-chromium nhúng Chromium (+359MB)
+#   ./build_app.sh --bundle-all    nhúng cả ba (bản cũ, ~482MB)
 #   ./build_app.sh --sign "Developer ID Application: Name (TEAMID)"
 #   ./build_app.sh --open          reveal the result in Finder when done
 #
-# Produces a self-contained bundle: Python runtime, the built React UI, the
-# plugins, and yt-dlp are all inside it. Nothing on PATH is required at run
-# time except ffmpeg, and only when --no-ffmpeg was used.
+# MẶC ĐỊNH KHÔNG NHÚNG BINARY NÀO. App tự tải yt-dlp và ffmpeg khi chạy lần
+# đầu, còn Chromium thì người dùng tự bấm cài trong Cài đặt nếu cần đường
+# dán-URL. Xem docs/2026-09-19-danh-gia-lai-kien-truc.md.
+#
+# Vì sao đảo mặc định: bản nhúng đủ ba nặng 482MB mà 359MB trong đó là Chromium,
+# thứ chỉ phục vụ MỘT đường ở vài site. Nhúng cũng là nguyên nhân macOS
+# Gatekeeper chặn app (một .app chưa ký nằm trong ruột .app khác).
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,19 +30,25 @@ VENDOR_CHROME="$ROOT_DIR/packaging/vendor/chrome"
 APP_PATH="$ROOT_DIR/dist/Streamloot.app"
 
 CLEAN=false
-WITH_FFMPEG=true
-WITH_CHROMIUM=true
+WITH_YTDLP=false
+WITH_FFMPEG=false
+WITH_CHROMIUM=false
 SIGN_IDENTITY=""
 REVEAL=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -c|--clean)      CLEAN=true; shift ;;
+        --with-ytdlp)    WITH_YTDLP=true; shift ;;
+        --with-ffmpeg)   WITH_FFMPEG=true; shift ;;
+        --with-chromium) WITH_CHROMIUM=true; shift ;;
+        --bundle-all)    WITH_YTDLP=true; WITH_FFMPEG=true; WITH_CHROMIUM=true; shift ;;
+        # Giữ lại cho quen tay: giờ đã là mặc định nên chỉ là không-làm-gì.
         --no-ffmpeg)     WITH_FFMPEG=false; shift ;;
         --no-chromium)   WITH_CHROMIUM=false; shift ;;
         --sign)          SIGN_IDENTITY="${2:-}"; shift 2 ;;
         --open)          REVEAL=true; shift ;;
-        -h|--help)       sed -n '4,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)       sed -n '4,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $1 (--help for details)" >&2; exit 1 ;;
     esac
 done
@@ -69,14 +81,17 @@ mkdir -p "$VENDOR_BIN"
 # yt-dlp: the official macOS build is a self-contained binary. Homebrew's
 # yt-dlp is NOT usable here -- it is a script whose shebang points at Homebrew's
 # own Python, which will not exist on another machine.
-if [[ ! -x "$VENDOR_BIN/yt-dlp" ]]; then
+if [[ "$WITH_YTDLP" == true && ! -x "$VENDOR_BIN/yt-dlp" ]]; then
     echo "    fetching yt-dlp (official standalone macOS build)..."
     curl -fsSL --retry 3 \
         "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" \
         -o "$VENDOR_BIN/yt-dlp"
     chmod +x "$VENDOR_BIN/yt-dlp"
-else
+elif [[ "$WITH_YTDLP" == true ]]; then
     echo "    yt-dlp already vendored (delete packaging/vendor to refresh)"
+else
+    rm -f "$VENDOR_BIN/yt-dlp"
+    echo "    bỏ qua yt-dlp — app tự tải khi chạy lần đầu (--with-ytdlp để nhúng)"
 fi
 
 if [[ "$WITH_FFMPEG" == true && ! -x "$VENDOR_BIN/ffmpeg" ]]; then
@@ -114,7 +129,8 @@ if [[ "$WITH_FFMPEG" == true && ! -x "$VENDOR_BIN/ffmpeg" ]]; then
         echo "             /opt/homebrew/bin and /usr/local/bin at run time." >&2
     fi
 elif [[ "$WITH_FFMPEG" == false ]]; then
-    echo "    skipping ffmpeg (--no-ffmpeg); app falls back to PATH at run time"
+    rm -f "$VENDOR_BIN/ffmpeg"
+    echo "    bỏ qua ffmpeg — app tự tải khi chạy lần đầu (--with-ffmpeg để nhúng)"
 fi
 
 # Chromium: các extractor dùng browser điều khiển nó qua CDP. Đóng gói riêng để
@@ -156,7 +172,8 @@ for x in d['channels']['Stable']['downloads']['chrome']:
         echo "    WARNING: không lấy được danh sách phiên bản Chrome for Testing" >&2
     fi
 elif [[ "$WITH_CHROMIUM" == false ]]; then
-    echo "    skipping Chromium (--no-chromium); app dùng Chrome hệ thống"
+    rm -rf "$VENDOR_CHROME"
+    echo "    bỏ qua Chromium — người dùng tự cài trong Cài đặt (--with-chromium để nhúng)"
 else
     echo "    Chromium đã vendor sẵn ($(cat "$VENDOR_CHROME/.version" 2>/dev/null || echo '?'))"
 fi
@@ -199,7 +216,12 @@ check() {
     fi
 }
 check "apps/desktop/ui/dist/index.html"
-check "bin/yt-dlp"
+
+# Binary giờ là TUỲ CHỌN: chỉ kiểm khi build có yêu cầu nhúng. Kiểm vô điều
+# kiện thì bản mặc định (không nhúng gì) luôn báo hỏng, mà nó là bản đúng.
+[[ "$WITH_YTDLP" == true ]]    && check "bin/yt-dlp"
+[[ "$WITH_FFMPEG" == true ]]   && check "bin/ffmpeg"
+[[ "$WITH_CHROMIUM" == true ]] && check "chrome/Google Chrome for Testing.app"
 
 # Plugin là file .py dạng data, nhưng thư viện chúng import phải nằm trong PYZ.
 # Thiếu DrissionPage thì mọi private extractor ném ImportError lúc chạy, factory

@@ -1,3 +1,7 @@
+> **CŨ — xem [2026-09-19-danh-gia-lai-kien-truc.md](2026-09-19-danh-gia-lai-kien-truc.md).**
+> Từ 19/09/2026 bản build mặc định **KHÔNG nhúng binary nào** và nặng **44 MB**.
+> Các con số dưới đây mô tả bản cũ (`./build_app.sh --bundle-all`), giữ lại để đối chiếu.
+
 # Báo Cáo Phân Tích Kích Thước Bản Build (Streamloot.app)
 
 ## Tổng quan

@@ -1,3 +1,8 @@
+> **CŨ — xem [2026-09-19-danh-gia-lai-kien-truc.md](2026-09-19-danh-gia-lai-kien-truc.md).**
+> Đề xuất chính ở đây (viết lại bằng Go/Rust) nhắm vào ~9% dung lượng. Đo lại cho thấy
+> 91% nằm ở binary nhúng sẵn; bỏ nhúng đưa bản build từ 482 MB xuống **44 MB** mà không
+> phải viết lại dòng nào. Giữ tài liệu này để đối chiếu lập luận.
+
 # Phân Tích Các Phương Án Kiến Trúc & Tối Ưu Dung Lượng
 
 Tài liệu này tổng hợp các phương án thay đổi ngôn ngữ lập trình, thư viện tự động hóa và chiến lược phân phối trình duyệt nhằm giải quyết bài toán kích thước file khổng lồ (~540MB) của phiên bản Python hiện tại.

@@ -394,3 +394,21 @@ body {
   font-size: 12px;
   text-align: center;
 }
+
+/* --- Cài đặt / Công cụ --- */
+.tools-panel { padding: 18px 22px; overflow-y: auto; }
+.tools-panel h2 { margin: 0 0 6px; font-size: 17px; }
+.tools-intro { margin: 0 0 18px; opacity: .7; font-size: 13px; max-width: 60ch; }
+.tool-row {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 14px 0; border-top: 1px solid rgba(255, 255, 255, .08);
+}
+.tool-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tool-name { font-weight: 600; }
+.tool-state { font-size: 12px; opacity: .75; }
+.tool-state.ok { color: #4ade80; opacity: 1; }
+.tool-state.missing { color: #fca5a5; opacity: 1; }
+.tool-why { font-size: 12px; opacity: .55; max-width: 60ch; }
+.tool-err { font-size: 12px; color: #fca5a5; }
+.tool-action { flex: none; }
+.tool-progress { font-size: 12px; opacity: .8; }
