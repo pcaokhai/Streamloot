@@ -261,6 +261,11 @@ với `netwatch.js` trong ngăn xếp, ngay dưới là script của Facebook.
 tham chiếu nào tới `chrome-extension`, `runtime.getURL` hay `import.meta`; ngăn
 xếp cho thấy chính trang gọi `send()` còn bản bọc chỉ nằm trên đường đi.
 
+**ĐÃ XÁC NHẬN bằng phép thử quyết định:** gỡ bản bọc `XMLHttpRequest` rồi cuộn
+lại cùng feed đó — lỗi **vẫn còn**. Nó có từ trước, do trang hoặc một extension
+khác (`chrome-extension://invalid/` là dấu hiệu kinh điển của content script bị
+mồ côi sau khi extension nào đó reload). Trước đây nó chỉ không mang tên ta.
+
 **Vẫn thu hẹp, vì lý do khác.** Bọc `send` làm tên file của ta xuất hiện trong
 ngăn xếp của lỗi người khác gây ra — nhận tiếng oan và làm nhiễu việc gỡ lỗi của
 người dùng. Facebook dùng `fetch` cho GraphQL nên bỏ XHR gần như không mất gì.
