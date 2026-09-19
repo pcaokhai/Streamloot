@@ -251,3 +251,22 @@ Vì thế mọi thao tác đều bọc `try/catch` riêng và luôn trả bản 
 
 **Điều kiện xét lại:** nếu thấy bất kỳ dấu hiệu nào trang bị ảnh hưởng, gỡ D6
 trước rồi mới tìm nguyên nhân — đường lùi vẫn dùng được.
+
+#### D6a. Bỏ bản bọc `XMLHttpRequest` (19/09, sau vòng thử tay)
+
+Thử tay thấy trong Console: `GET chrome-extension://invalid/ net::ERR_FAILED`
+với `netwatch.js` trong ngăn xếp, ngay dưới là script của Facebook.
+
+**Điều tra cho thấy KHÔNG phải ta gây ra.** File build 1268 byte, không có một
+tham chiếu nào tới `chrome-extension`, `runtime.getURL` hay `import.meta`; ngăn
+xếp cho thấy chính trang gọi `send()` còn bản bọc chỉ nằm trên đường đi.
+
+**Vẫn thu hẹp, vì lý do khác.** Bọc `send` làm tên file của ta xuất hiện trong
+ngăn xếp của lỗi người khác gây ra — nhận tiếng oan và làm nhiễu việc gỡ lỗi của
+người dùng. Facebook dùng `fetch` cho GraphQL nên bỏ XHR gần như không mất gì.
+
+Kèm theo: bản bọc `fetch` giờ **bỏ qua request không phải http(s)** — scheme
+khác không bao giờ mang dữ liệu ta cần.
+
+**Nguyên tắc rút ra:** khi can thiệp vào API của trang, cái giá không chỉ là
+"có làm hỏng không" mà còn là "có bị quy oan không". Bề mặt càng hẹp càng tốt.
