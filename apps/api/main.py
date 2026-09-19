@@ -445,6 +445,63 @@ def _run_manifest_task(task_id: str, req: PreparedDownloadRequest, mpd_path: str
             pass
 
 
+#: Tiến trình cài công cụ, theo tên. Sống trong RAM của tiến trình backend —
+#: mất khi app tắt, và đó là đúng: cài dở thì lần sau cài lại từ đầu, vì
+#: tool_installer không để lại file cụt.
+_installing: dict = {}
+_install_lock = threading.Lock()
+
+
+def _do_install(name: str):
+    def progress(done: int, total: int, label: str):
+        with _install_lock:
+            _installing[name] = {"done": done, "total": total, "label": label, "error": None}
+
+    try:
+        from services.tool_installer import install
+        install(name, progress)
+        with _install_lock:
+            _installing.pop(name, None)
+    except Exception as e:
+        Logger.error(f"Cài {name} thất bại: {e}", exc_info=True)
+        with _install_lock:
+            _installing[name] = {"done": 0, "total": 0, "label": name, "error": str(e)}
+
+
+@app.get("/api/v1/tools", dependencies=[Depends(verify_api_key)])
+def get_tools():
+    """
+    Công cụ nào đã có, đến từ đâu, và cái nào đang tải.
+
+    `required` phân biệt hai nhóm hành xử khác hẳn nhau: thiếu yt-dlp/ffmpeg thì
+    không tải được gì; thiếu Chromium chỉ ảnh hưởng đường dán-URL ở vài site nên
+    KHÔNG được chặn app.
+    """
+    from utils import tools as tool_mod
+    with _install_lock:
+        busy = dict(_installing)
+    return {"tools": tool_mod.as_dict(), "installing": busy}
+
+
+@app.post("/api/v1/tools/{name}/install", dependencies=[Depends(verify_api_key)])
+def install_tool(name: str):
+    """
+    Bắt đầu tải một công cụ. Trả ngay, tiến trình xem ở `GET /tools`.
+
+    Không chạy đồng bộ: Chromium ~180MB, giữ một request HTTP mở suốt thời gian
+    đó là mời timeout ở mọi tầng trung gian.
+    """
+    from utils import tools as tool_mod
+    if name not in (*tool_mod.REQUIRED, *tool_mod.OPTIONAL):
+        raise HTTPException(status_code=400, detail=f"Không biết công cụ '{name}'.")
+    with _install_lock:
+        if name in _installing and not _installing[name].get("error"):
+            return {"started": False, "message": "Đang cài rồi."}
+        _installing[name] = {"done": 0, "total": 0, "label": name, "error": None}
+    threading.Thread(target=_do_install, args=(name,), daemon=True).start()
+    return {"started": True}
+
+
 @app.post("/api/v1/downloads/manifest", dependencies=[Depends(verify_api_key)])
 async def start_manifest_download(req: ManifestDownloadRequest, background_tasks: BackgroundTasks):
     """

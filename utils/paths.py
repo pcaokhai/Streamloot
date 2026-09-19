@@ -77,7 +77,15 @@ def ensure_tool_path() -> None:
     usual Homebrew prefixes as a fallback for anything we didn't vendor.
     Idempotent — safe to call more than once.
     """
-    candidates = [str(bundled_bin_dir()), "/opt/homebrew/bin", "/usr/local/bin"]
+    # Thứ tự có ý nghĩa: bản nhúng (ta tự chọn) -> bản đã tải (ta tự tải, biết
+    # phiên bản) -> Homebrew (không kiểm soát được). Thư mục tải nằm ở
+    # user_data_dir vì bundle là chỉ-đọc sau khi ký.
+    candidates = [
+        str(bundled_bin_dir()),
+        str(user_data_dir() / "tools"),
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+    ]
     current = os.environ.get("PATH", "").split(os.pathsep)
     additions = [c for c in candidates if c not in current and os.path.isdir(c)]
     if additions:

@@ -9,13 +9,25 @@ from core.extractor import BaseExtractor
 from core.models import VideoInfo
 from typing import Optional, List
 from utils.logger import Logger
-from utils import paths
+from utils import paths, tools
 
 # ponytail: process-wide lock, serializes concurrent browser extractions
 # (format preview + actual download) so no two ChromiumPage instances share
 # a CDP port/profile and kill each other's session. Per-request pooling if
 # throughput ever matters.
 _browser_lock = Lock()
+
+
+def _chrome_path():
+    """
+    Chromium để điều khiển: bản nhúng, hoặc bản người dùng đã cài qua Cài đặt.
+
+    Trả None khi chưa có — lúc đó DrissionPage tự dò trình duyệt hệ thống, và
+    nếu cũng không có thì lỗi sẽ nói rõ là thiếu trình duyệt, chứ không phải
+    một lỗi CDP khó hiểu.
+    """
+    st = tools.find("chromium")
+    return st.path if st.found else None
 
 
 def _free_port() -> int:
@@ -42,8 +54,8 @@ class BaseBrowserExtractor(BaseExtractor):
         co = ChromiumOptions()
 
         # Ưu tiên Chromium đóng gói kèm. Không có thì để DrissionPage tự dò trình
-        # duyệt hệ thống (đường chạy từ source). Xem paths.bundled_chrome_path().
-        bundled = paths.bundled_chrome_path()
+        # duyệt hệ thống (đường chạy từ source). Xem _chrome_path().
+        bundled = _chrome_path()
         if bundled:
             co.set_browser_path(str(bundled))
             Logger.get_logger().debug(f"Dùng Chromium đóng gói kèm: {bundled}")
