@@ -20,7 +20,7 @@ import { groupFormats, qualityName } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
 import { extractPlayerResponse, formatsFromPlayerResponse } from '../../lib/youtube';
-import { extractVideos, pickByDuration } from '../../lib/facebook';
+import { extractVideos, pickByDuration, listLabel } from '../../lib/facebook';
 import { parseMpd } from '../../lib/dash';
 import type { FbVideo } from '../../lib/facebook';
 import { downloadName } from '../../lib/filename';
@@ -631,10 +631,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         const dur = anchored?.duration ?? NaN;
         const hit = pickByDuration(all, dur);
         const embedded = hit >= 0 ? [all[hit]] : all;
-        const khac = all.length - embedded.length;
-        say(khac > 0
-          ? `Không chắc video nào — hiện cả ${all.length} video trên trang`
-          : 'Bấm một dòng để tải');
+        say(listLabel({ matched: hit >= 0, total: all.length }));
         embedded.forEach((v, i) => {
           const rows: FormatRow[] = v.progressive.map((p) => ({
             formatId: '',

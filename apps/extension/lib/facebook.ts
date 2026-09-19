@@ -206,6 +206,18 @@ export function pickByDuration(
 }
 
 /**
+ * Câu nói cho người dùng biết panel đang hiện gì.
+ *
+ * Tách ra thành hàm thuần vì bản viết thẳng trong DOM đã ĐẢO NGƯỢC điều kiện:
+ * nó báo "không chắc" đúng lúc vừa lọc ra được một video. Phần vẽ không test
+ * được (ADR 0006), phần quyết định thì được.
+ */
+export function listLabel(o: { matched: boolean; total: number }): string {
+  if (o.matched || o.total <= 1) return 'Bấm một dòng để tải';
+  return `Không chắc video nào — hiện cả ${o.total} video trên trang`;
+}
+
+/**
  * URL xem video, dựng từ id khi không tìm được `permalink_url`.
  *
  * Dùng cho đường dự phòng: yt-dlp nhận được dạng này. Không đoán đường dẫn

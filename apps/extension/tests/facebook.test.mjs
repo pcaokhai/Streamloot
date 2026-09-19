@@ -1,4 +1,4 @@
-import { extractVideos, watchUrl, pickByDuration } from '../.tmp-facebook.mjs';
+import { extractVideos, watchUrl, pickByDuration, listLabel } from '../.tmp-facebook.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -92,6 +92,15 @@ t('video thiếu thời lượng không bao giờ được chọn',
 t('thời lượng không hợp lệ thì trả -1', () => pickByDuration(vids, NaN), -1);
 t('thời lượng 0 thì trả -1', () => pickByDuration(vids, 0), -1);
 t('danh sách rỗng', () => pickByDuration([], 30), -1);
+
+// --- câu chữ: bản đầu ĐẢO NGƯỢC điều kiện, báo "không chắc" đúng lúc vừa lọc được ---
+t('lọc ra đúng một video thì KHÔNG nói không chắc',
+  () => listLabel({ matched: true, total: 12 }), 'Bấm một dòng để tải');
+t('không lọc được thì nói rõ đang hiện cả trang',
+  () => listLabel({ matched: false, total: 12 }), 'Không chắc video nào — hiện cả 12 video trên trang');
+t('trang chỉ có một video thì không cần giải thích gì',
+  () => listLabel({ matched: false, total: 1 }), 'Bấm một dòng để tải');
+t('trang không có video nào', () => listLabel({ matched: false, total: 0 }), 'Bấm một dòng để tải');
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
