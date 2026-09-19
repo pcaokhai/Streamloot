@@ -1,4 +1,4 @@
-import { extractVideos, watchUrl } from '../.tmp-facebook.mjs';
+import { extractVideos, watchUrl, pickByDuration } from '../.tmp-facebook.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -79,6 +79,19 @@ t('URL không phải http bị loại',
 // --- dựng URL xem từ id ---
 t('dựng URL xem từ id số', () => watchUrl('123'), 'https://www.facebook.com/watch/?v=123');
 t('id không phải số thì null, không dựng bừa', () => watchUrl('abc'), null);
+
+// --- gắn thẻ <video> đang neo với đúng mục trong payload ---
+const vids = [{ lengthSec: 30.1 }, { lengthSec: 19.4 }, { lengthSec: 125 }];
+t('khớp đúng video theo thời lượng', () => pickByDuration(vids, 19.5), 1);
+t('lệch trong dung sai vẫn khớp', () => pickByDuration(vids, 30.9), 0);
+t('lệch quá dung sai thì không khớp', () => pickByDuration(vids, 60), -1);
+t('HAI video cùng khớp thì trả -1 — đoán bừa là đưa nhầm video',
+  () => pickByDuration([{ lengthSec: 30.0 }, { lengthSec: 30.2 }], 30.1), -1);
+t('video thiếu thời lượng không bao giờ được chọn',
+  () => pickByDuration([{ lengthSec: null }], 30), -1);
+t('thời lượng không hợp lệ thì trả -1', () => pickByDuration(vids, NaN), -1);
+t('thời lượng 0 thì trả -1', () => pickByDuration(vids, 0), -1);
+t('danh sách rỗng', () => pickByDuration([], 30), -1);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

@@ -314,3 +314,35 @@ khác progressive, đường này **đòi app Streamloot đang chạy**. Ngườ
 trước khi bấm, thay vì bấm rồi mới nhận lỗi.
 
 9 test cho endpoint, gồm cả hai ca xoá file tạm (tải xong, và tải hỏng).
+
+---
+
+## 8. D8 — Gắn nút nổi với đúng video, theo thời lượng
+
+**Vấn đề.** Panel liệt kê MỌI video trên trang. Thử tay: trang feed hiện "6
+video" trong khi người dùng chỉ thấy một cái nằm cạnh nút. Đúng về kỹ thuật,
+sai về thứ người dùng đang hỏi.
+
+D5 đã né chuyện này ("không gán bừa") vì lúc đó không có dữ liệu để thiết kế:
+file HTML lưu bằng View Page Source có **0 thẻ `<video>`** — thẻ đó do JS dựng
+lúc chạy.
+
+**Tín hiệu tìm được.** Đo trên manifest thật: **mọi MPD đều khai
+`mediaPresentationDuration`** (vd `PT30.101334S`). Thẻ `<video>` đang neo cũng
+biết `duration` của chính nó. Hai phía cùng biết một con số.
+
+Tín hiệu này tốt hơn `length_in_second` moi từ object cha (§2.2, D5): trường kia
+chỉ trúng 1/3 video, còn thời lượng trong manifest thì luôn có. Nên `lengthSec`
+giờ ưu tiên đọc từ manifest.
+
+**Quy tắc chọn.** Khớp trong dung sai 1.5 giây. Trả `-1` khi không chắc — và
+"không chắc" **bao gồm cả trường hợp có hai video cùng khớp**. Lúc đó hiện cả
+danh sách kèm câu "Không chắc video nào", để người dùng tự chọn.
+
+**Vì sao không đoán khi mơ hồ.** Đưa nhầm video là lỗi người dùng **không có
+cách nào tự phát hiện** trước khi tải xong — khác hẳn với việc hiện thừa vài
+dòng, thứ họ nhìn là biết ngay.
+
+**Giới hạn còn lại.** Hai video cùng độ dài trên một trang thì vẫn phải chọn
+tay. Chấp nhận: thêm tín hiệu phụ (tỉ lệ khung hình) chỉ thu hẹp chứ không xoá
+được ca mơ hồ, mà lại thêm một chỗ có thể đoán sai.

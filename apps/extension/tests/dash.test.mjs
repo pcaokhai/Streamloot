@@ -1,4 +1,4 @@
-import { parseMpd, bestVideo, bestAudio } from '../.tmp-dash.mjs';
+import { parseMpd, bestVideo, bestAudio, presentationDuration } from '../.tmp-dash.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -73,6 +73,15 @@ const CODEC_ONLY = `<MPD><Period><AdaptationSet>
 </AdaptationSet></Period></MPD>`;
 t('suy ra luồng tiếng từ codec khi thiếu mimeType',
   () => parseMpd(CODEC_ONLY)[0].audioOnly, true);
+
+// --- thời lượng: tín hiệu để gắn <video> với đúng manifest của nó ---
+t('đọc thời lượng dạng Facebook dùng',
+  () => presentationDuration('<MPD mediaPresentationDuration="PT30.101334S"><Period/></MPD>'), 30.101334);
+t('số nguyên giây', () => presentationDuration('<MPD mediaPresentationDuration="PT19S"/>'), 19);
+t('không khai thì null', () => presentationDuration('<MPD><Period/></MPD>'), null);
+t('dạng có giờ/phút thì null, KHÔNG đoán sai',
+  () => presentationDuration('<MPD mediaPresentationDuration="PT1H2M3S"/>'), null);
+t('thời lượng 0 coi như không có', () => presentationDuration('<MPD mediaPresentationDuration="PT0S"/>'), null);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

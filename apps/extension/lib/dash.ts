@@ -114,3 +114,23 @@ export function bestAudio(reps: DashRep[]): DashRep | null {
   if (!auds.length) return null;
   return auds.reduce((a, b) => ((b.bandwidth ?? 0) > (a.bandwidth ?? 0) ? b : a));
 }
+
+/**
+ * Thời lượng khai trong MPD, tính bằng giây. `null` khi không có.
+ *
+ * Dùng để GẮN một thẻ `<video>` trên trang với đúng manifest của nó: trang feed
+ * có nhiều video, mà `<video>` không mang id nào để đối chiếu. Thời lượng thì
+ * cả hai phía đều biết.
+ *
+ * Đây là tín hiệu tốt hơn `length_in_second` moi từ object cha: đo thật, MỌI
+ * manifest đều khai `mediaPresentationDuration`, còn trường kia chỉ trúng 1/3.
+ *
+ * Chỉ đọc dạng `PT<số>S` — đó là dạng Facebook dùng. Dạng ISO 8601 đầy đủ có
+ * cả giờ và phút; thấy dạng khác thì trả `null` thay vì đoán sai.
+ */
+export function presentationDuration(xml: string): number | null {
+  const m = /mediaPresentationDuration="PT([\d.]+)S"/i.exec(xml);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}

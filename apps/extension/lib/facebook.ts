@@ -1,3 +1,5 @@
+import { presentationDuration } from './dash';
+
 /**
  * Bóc video Facebook ra khỏi HTML trang.
  *
@@ -168,11 +170,39 @@ export function extractVideos(html: string): FbVideo[] {
       progressive,
       manifestXml,
       permalinkUrl: nearestString(before, 'permalink_url'),
-      lengthSec: nearestNumber(before, 'length_in_second'),
+      // Ưu tiên thời lượng khai trong manifest: đo thật, MỌI manifest đều có,
+      // còn `length_in_second` ở object cha chỉ trúng 1/3.
+      lengthSec:
+        (manifestXml ? presentationDuration(manifestXml) : null) ??
+        nearestNumber(before, 'length_in_second'),
       isLive: false,
     });
   }
   return out;
+}
+
+/**
+ * Chọn video khớp với thẻ `<video>` đang neo nút, theo THỜI LƯỢNG.
+ *
+ * Trang feed có nhiều video nhưng nút nổi chỉ neo vào MỘT cái, và `<video>`
+ * không mang id nào để đối chiếu. Thời lượng thì cả hai phía đều biết.
+ *
+ * Trả `-1` khi không chắc — và "không chắc" gồm cả trường hợp có HAI video cùng
+ * khớp. Đoán bừa lúc đó là đưa người dùng nhầm video mà họ không có cách nào
+ * biết; thà hiện cả danh sách để họ tự chọn.
+ */
+export function pickByDuration(
+  videos: { lengthSec: number | null }[],
+  targetSec: number,
+  tolerance = 1.5,
+): number {
+  if (!Number.isFinite(targetSec) || targetSec <= 0) return -1;
+  const near = videos
+    .map((v, i) => ({ i, d: v.lengthSec === null ? Infinity : Math.abs(v.lengthSec - targetSec) }))
+    .filter((x) => x.d <= tolerance)
+    .sort((a, b) => a.d - b.d);
+  if (near.length !== 1) return -1; // không có, hoặc mơ hồ
+  return near[0].i;
 }
 
 /**

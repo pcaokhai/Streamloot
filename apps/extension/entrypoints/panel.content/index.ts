@@ -20,7 +20,7 @@ import { groupFormats, qualityName } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
 import { extractPlayerResponse, formatsFromPlayerResponse } from '../../lib/youtube';
-import { extractVideos } from '../../lib/facebook';
+import { extractVideos, pickByDuration } from '../../lib/facebook';
 import { parseMpd } from '../../lib/dash';
 import type { FbVideo } from '../../lib/facebook';
 import { downloadName } from '../../lib/filename';
@@ -620,10 +620,20 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // Nhận diện theo HÌNH DẠNG DỮ LIỆU, không theo tên miền: không thấy thì
       // trả rỗng và đi đường cũ. Gắn theo tên miền là đưa danh sách site vào
       // code, mà CLAUDE.md §3.1 cấm.
-      const embedded = videosFromPage();
-      if (embedded.length) {
-        say(embedded.length > 1
-          ? `Tìm thấy ${embedded.length} video trên trang này`
+      const all = videosFromPage();
+      if (all.length) {
+        // Trang feed có nhiều video, nhưng nút nổi neo vào ĐÚNG MỘT cái. Gắn
+        // theo thời lượng: `<video>` và manifest đều biết con số đó, còn
+        // `<video>` thì không mang id nào để đối chiếu.
+        //
+        // Không chắc thì hiện cả danh sách, KHÔNG đoán: đưa nhầm video là thứ
+        // người dùng không có cách nào tự phát hiện trước khi tải xong.
+        const dur = anchored?.duration ?? NaN;
+        const hit = pickByDuration(all, dur);
+        const embedded = hit >= 0 ? [all[hit]] : all;
+        const khac = all.length - embedded.length;
+        say(khac > 0
+          ? `Không chắc video nào — hiện cả ${all.length} video trên trang`
           : 'Bấm một dòng để tải');
         embedded.forEach((v, i) => {
           const rows: FormatRow[] = v.progressive.map((p) => ({
