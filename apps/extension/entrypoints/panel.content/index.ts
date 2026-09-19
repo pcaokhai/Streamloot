@@ -20,6 +20,8 @@ import { groupFormats } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
 import { extractPlayerResponse, formatsFromPlayerResponse } from '../../lib/youtube';
+import { extractVideos } from '../../lib/facebook';
+import { downloadName } from '../../lib/filename';
 
 /**
  * Panel KHÔNG gọi HTTP trực tiếp.
@@ -366,6 +368,21 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       }
     }
 
+    /**
+     * Video có URL file hoàn chỉnh nhúng sẵn trong HTML trang.
+     *
+     * Đọc `innerHTML` là dựng một chuỗi vài MB (trang Facebook đo được 7 MB),
+     * nên CHỈ gọi khi người dùng mở panel — không gọi theo nhịp.
+     */
+    function videosFromPage() {
+      try {
+        return extractVideos(document.documentElement.innerHTML);
+      } catch (err) {
+        console.warn('[Streamloot] đọc video từ trang hỏng:', err);
+        return [];
+      }
+    }
+
     function render(root: HTMLElement) {
       const cap = pickCapture(captures, {
         pageHost: location.hostname,
@@ -464,7 +481,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         el.append(c1, c2, c3);
         el.onclick = () => {
           if (!canSubmit(pending)) return; // đang bay — bấm thêm không làm gì
-          void startDownload(row);
+          void (row.directUrl ? saveDirect(row) : startDownload(row));
         };
         rowEls.push(el);
         list.append(el);
@@ -489,6 +506,38 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
        * sau khi bàn giao. Muốn xem tiến trình thì mở popup, hoặc nhìn vòng trên
        * icon. Để panel ở lại là chắn mất video người dùng đang xem.
        */
+      /**
+       * Tải THẲNG bằng trình duyệt, không đụng tới backend (ADR 0007 D2).
+       *
+       * Dùng cho URL là file hoàn chỉnh đã có sẵn tiếng. Chạy được cả khi app
+       * Streamloot chưa mở — đó là cả điểm của đường này.
+       */
+      async function saveDirect(row: FormatRow): Promise<void> {
+        setPending(true);
+        say('Đang giao cho trình duyệt tải…');
+        let r: { ok: boolean; error?: string };
+        try {
+          r = await ask<{ ok: boolean; error?: string }>({
+            type: 'saveDirect',
+            url: row.directUrl,
+            filename: row.fileName ?? 'video.mp4',
+          });
+        } catch (err) {
+          say(err instanceof Error ? err.message : String(err), true);
+          setPending(false);
+          return;
+        }
+        if (!r.ok) {
+          say(r.error ?? 'Không tải được', true);
+          setPending(false);
+          return;
+        }
+        mounted = false;
+        setPending(false);
+        root.style.display = 'none';
+        applyFabVisibility();
+      }
+
       async function startDownload(row: FormatRow): Promise<void> {
         setPending(true);
         say('Đang bắt đầu…');
@@ -528,6 +577,42 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // cách IDM và Cốc Cốc làm (ADR 0005 §2.5d).
       const payload = cap ? toPayload(cap) : null;
       say(byUrl ? 'Đang hỏi yt-dlp xem trang này tải được không…' : 'Đang lấy danh sách chất lượng…');
+      // Trang nhúng sẵn URL file hoàn chỉnh (Facebook — ADR 0007).
+      //
+      // Nhận diện theo HÌNH DẠNG DỮ LIỆU, không theo tên miền: không thấy thì
+      // trả rỗng và đi đường cũ. Gắn theo tên miền là đưa danh sách site vào
+      // code, mà CLAUDE.md §3.1 cấm.
+      const embedded = videosFromPage();
+      if (embedded.length) {
+        say(embedded.length > 1
+          ? `Tìm thấy ${embedded.length} video trên trang này`
+          : 'Bấm một dòng để tải');
+        embedded.forEach((v, i) => {
+          const rows: FormatRow[] = v.progressive.map((p) => ({
+            formatId: '',
+            label: p.quality || 'video',
+            detail: 'mp4',
+            recommended: p.quality.toUpperCase() === 'HD',
+            name: p.quality || 'Video',
+            ext: 'mp4',
+            url: null,
+            directUrl: p.url,
+            fileName: downloadName({
+              title: document.title,
+              id: v.id,
+              quality: p.quality,
+              ext: 'mp4',
+            }),
+          }));
+          const secs = v.lengthSec;
+          const dur = typeof secs === 'number' && secs > 0
+            ? ` · ${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, '0')}`
+            : '';
+          addGroup(embedded.length > 1 ? `VIDEO ${i + 1}${dur}` : `VIDEO${dur}`, '▭', rows);
+        });
+        return;
+      }
+
       // YouTube nhúng sẵn danh sách chất lượng vào chính HTML trang — đọc được
       // ngay, không request nào cả. Tải thì vẫn giao cho backend (yt-dlp lo phần
       // giải chữ ký), nên đây thuần tuý là rút ngắn phần CHỜ.

@@ -21,7 +21,10 @@ export default defineConfig({
     // `fetch` của chính extension (fetch cấm header này). Nhờ đó service worker
     // tự đọc được master m3u8 và liệt kê chất lượng ngay, không phải đợi backend
     // spawn yt-dlp. Rule được tạo theo phiên và gỡ ngay sau mỗi lần gọi.
-    permissions: ['webRequest', 'storage', 'tabs', 'alarms', 'declarativeNetRequest'],
+    // `downloads`: tải thẳng trong trình duyệt cho những site nhúng sẵn URL
+    // file hoàn chỉnh (ADR 0007 D2). Dùng chrome.downloads thay vì fetch vào
+    // bộ nhớ: không đụng CORS, và không giữ file vài trăm MB trong RAM.
+    permissions: ['webRequest', 'storage', 'tabs', 'alarms', 'declarativeNetRequest', 'downloads'],
 
     // Extension phải quan sát được site bất kỳ người dùng mở. Đây là quyền rộng
     // nhất Chrome có — thu hẹp được thì nên thu, nhưng danh sách site không biết

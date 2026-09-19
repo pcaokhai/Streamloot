@@ -152,6 +152,8 @@ export default defineBackground(() => {
       info?: VideoInfoPayload;
       formatId?: string | null;
       taskId?: string;
+      /** Tên file khi tải thẳng bằng trình duyệt (saveDirect). */
+      filename?: string;
       /** URL trang, cho đường hỏi yt-dlp trực tiếp (formatsByUrl / startByUrl). */
       url?: string;
     };
@@ -192,6 +194,19 @@ export default defineBackground(() => {
 
     if (m?.type === 'formatsByUrl' && typeof m.url === 'string') {
       return formatsByUrl(m.url);
+    }
+
+    if (m?.type === 'saveDirect' && typeof m.url === 'string' && typeof m.filename === 'string') {
+      // Trình duyệt tự tải, ta không đụng vào byte nào.
+      //
+      // Phải ở service worker chứ không phải content script: content script
+      // không gọi được chrome.downloads, và một `fetch` từ đó mang origin của
+      // TRANG nên CDN có thể chặn theo CORS. Ngoài ra tải bằng fetch là giữ cả
+      // file trong RAM — video vài trăm MB thì đó là cách làm sập tab.
+      return browser.downloads
+        .download({ url: m.url, filename: m.filename, saveAs: false })
+        .then((id) => ({ ok: true as const, downloadId: id }))
+        .catch((e: unknown) => ({ ok: false as const, error: errorText(e) }));
     }
 
     if (m?.type === 'startByUrl' && typeof m.url === 'string') {

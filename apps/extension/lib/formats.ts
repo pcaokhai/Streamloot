@@ -20,6 +20,15 @@ export interface FormatRow {
   ext: string;
   /** URL biến thể HLS nếu có (đường manifest nhanh); null thì tải theo formatId. */
   url: string | null;
+  /**
+   * Tải THẲNG bằng trình duyệt, không qua backend (ADR 0007 D2).
+   *
+   * Chỉ đặt khi URL là một file hoàn chỉnh đã có sẵn tiếng. Có trường này thì
+   * panel bỏ qua backend hoàn toàn — chạy được cả khi app chưa mở.
+   */
+  directUrl?: string;
+  /** Tên file khi tải thẳng. Bắt buộc đi kèm `directUrl`. */
+  fileName?: string;
 }
 
 /**
