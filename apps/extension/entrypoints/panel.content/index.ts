@@ -360,17 +360,52 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
      * rỗng và người gọi đi đường cũ. Gắn theo tên miền sẽ là đưa danh sách site
      * vào code, mà đó đúng thứ CLAUDE.md §3.1 cấm.
      */
-    function formatsFromPage(): FormatOption[] {
+    function parsePage(html: string): FormatOption[] {
       try {
-        const pr = extractPlayerResponse(document.documentElement.innerHTML);
+        const pr = extractPlayerResponse(html);
         if (!pr) return [];
-        // Đối chiếu id: YouTube điều hướng SPA nên khối dữ liệu cũ còn nguyên
-        // trong DOM sau khi đã chuyển sang video khác. Lệch id thì coi như
-        // KHÔNG có — thà đi đường chậm còn hơn tải nhầm video.
+        // Đối chiếu id: trang có thể mang dữ liệu của video KHÁC — YouTube điều
+        // hướng kiểu SPA nên khối cũ còn sót lại. Lệch id thì coi như không có;
+        // thà đi đường chậm còn hơn tải nhầm video.
         if (!sameVideo(currentVideoId(location.href), playerResponseVideoId(pr))) return [];
         return formatsFromPlayerResponse(pr);
       } catch (err) {
         console.warn('[Streamloot] đọc danh sách từ trang hỏng:', err);
+        return [];
+      }
+    }
+
+    /**
+     * Danh sách chất lượng lấy từ chính trang.
+     *
+     * Đọc DOM trước vì rẻ. Nhưng DOM thường KHÔNG còn dữ liệu: YouTube xoá các
+     * thẻ `<script>` bootstrap sau khi chạy để giải phóng bộ nhớ, nên
+     * `innerHTML` không có `ytInitialPlayerResponse` dù HTML máy chủ trả thì có
+     * (đo: 1.39 MB, 27 format).
+     *
+     * Lúc đó tải lại chính URL này — same-origin nên không vướng CORS, và bản
+     * máy chủ trả luôn ứng với video ĐANG mở, nên giải quyết luôn ca điều hướng
+     * SPA. Vẫn rẻ hơn nhiều so với đường backend (hai lần chạy yt-dlp).
+     */
+    async function formatsFromPage(): Promise<FormatOption[]> {
+      const fromDom = parsePage(document.documentElement.innerHTML);
+      if (fromDom.length) return fromDom;
+      try {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), PAGE_FETCH_TIMEOUT_MS);
+        try {
+          const res = await fetch(location.href, {
+            credentials: 'same-origin',
+            headers: { Accept: 'text/html' },
+            signal: ctl.signal,
+          });
+          if (!res.ok) return [];
+          return parsePage(await res.text());
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch (err) {
+        console.warn('[Streamloot] tải lại trang để đọc danh sách hỏng:', err);
         return [];
       }
     }
@@ -389,6 +424,9 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         return [];
       }
     }
+
+    /** Quá ngưỡng này thì bỏ, đi đường backend. */
+    const PAGE_FETCH_TIMEOUT_MS = 5000;
 
     function render(root: HTMLElement) {
       const cap = pickCapture(captures, {
@@ -740,21 +778,17 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         return;
       }
 
-      // YouTube nhúng sẵn danh sách chất lượng vào chính HTML trang — đọc được
-      // ngay, không request nào cả. Tải thì vẫn giao cho backend (yt-dlp lo phần
-      // giải chữ ký), nên đây thuần tuý là rút ngắn phần CHỜ.
-      const fromPage = byUrl ? formatsFromPage() : [];
-      const askFormats = fromPage.length
-        ? Promise.resolve({ ok: true as const, formats: fromPage })
-        : byUrl
-        ? ask<{ ok: boolean; formats?: FormatOption[]; error?: string }>({
-            type: 'formatsByUrl',
-            url: location.href,
-          })
-        : ask<{ ok: boolean; formats?: FormatOption[]; error?: string }>({
-            type: 'listFormats',
-            info: payload!,
-          });
+      // Trang tự mang sẵn danh sách chất lượng (YouTube). Đọc được thì khỏi
+      // phải đợi backend chạy yt-dlp hai lần. Tải thì vẫn giao cho backend —
+      // nó lo phần giải chữ ký — nên đây thuần tuý là rút ngắn phần CHỜ.
+      type FormatsReply = { ok: boolean; formats?: FormatOption[]; error?: string };
+      const askFormats: Promise<FormatsReply> = byUrl
+        ? formatsFromPage().then((f) =>
+            f.length
+              ? { ok: true as const, formats: f }
+              : ask<FormatsReply>({ type: 'formatsByUrl', url: location.href }),
+          )
+        : ask<FormatsReply>({ type: 'listFormats', info: payload! });
       void askFormats.then((r) => {
         if (!r.ok) {
           if (byUrl) {
