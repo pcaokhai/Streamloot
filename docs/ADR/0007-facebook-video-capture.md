@@ -346,3 +346,40 @@ dòng, thứ họ nhìn là biết ngay.
 **Giới hạn còn lại.** Hai video cùng độ dài trên một trang thì vẫn phải chọn
 tay. Chấp nhận: thêm tín hiệu phụ (tỉ lệ khung hình) chỉ thu hẹp chứ không xoá
 được ca mơ hồ, mà lại thêm một chỗ có thể đoán sai.
+
+---
+
+## 9. D9 — Đường lùi cuối: permalink + yt-dlp
+
+Hoàn tất thứ tự ba đường ở D2.
+
+**Khi nào dùng.** Video không có `progressive_urls` lẫn `dash_manifests` — vẫn
+gặp trong payload, và trước đây bị bỏ qua hoàn toàn nên không bao giờ hiện ra.
+
+**Cách làm.** Giữ lại video đó nếu dựng được URL xem (`permalink_url`, hoặc
+`watch/?v=<id>` từ id số). Panel hiện một dòng "Chất lượng tốt nhất (app tự
+chọn)" đi qua `startByUrl` → backend → yt-dlp.
+
+**Chi tiết dễ sai.** Gửi URL **của chính video đó**, không phải `location.href`.
+Trang feed có nhiều video, mỗi cái một permalink riêng; gửi URL trang thì backend
+tải nhầm cái đầu tiên nó thấy. Vì thế `FormatRow` có thêm `pageUrl`.
+
+**Không giữ video không có đường nào.** `id` rỗng thì không dựng nổi URL, và một
+dòng bấm không được là nói dối người dùng — thà không hiện.
+
+**Giới hạn.** Đường này đòi app đang chạy, và yt-dlp phải hỗ trợ đúng dạng URL
+đó. Đo trước đây: URL reel thì được, URL trang feed thì `Unsupported URL` — nên
+`watch/?v=<id>` là dạng đáng tin hơn để dựng.
+
+---
+
+## 10. Trạng thái tính năng Facebook
+
+| Đường | Cần app? | Chất lượng | Trạng thái |
+|---|---|---|---|
+| Progressive (D2) | Không | SD / HD | Chạy, đã xác nhận có tiếng |
+| DASH qua manifest (D7) | **Có** | tới 1440p+ | Chạy, đã xác nhận |
+| Permalink + yt-dlp (D9) | **Có** | app tự chọn | Mới, chưa thử tay |
+| Quan sát response (D6) | — | — | **Rejected** — không có dữ liệu để bắt |
+
+Gắn nút với đúng video: theo thời lượng manifest (D8).

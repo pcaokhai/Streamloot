@@ -20,7 +20,7 @@ import { groupFormats, qualityName } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
 import { extractPlayerResponse, formatsFromPlayerResponse } from '../../lib/youtube';
-import { extractVideos, pickByDuration, listLabel } from '../../lib/facebook';
+import { extractVideos, pickByDuration, listLabel, watchUrl } from '../../lib/facebook';
 import { parseMpd } from '../../lib/dash';
 import type { FbVideo } from '../../lib/facebook';
 import { downloadName } from '../../lib/filename';
@@ -483,7 +483,13 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         el.append(c1, c2, c3);
         el.onclick = () => {
           if (!canSubmit(pending)) return; // đang bay — bấm thêm không làm gì
-          void (row.directUrl ? saveDirect(row) : row.manifestXml ? startByManifest(row) : startDownload(row));
+          void (row.directUrl
+            ? saveDirect(row)
+            : row.manifestXml
+            ? startByManifest(row)
+            : row.pageUrl
+            ? startByPageUrl(row)
+            : startDownload(row));
         };
         rowEls.push(el);
         list.append(el);
@@ -508,6 +514,39 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
        * sau khi bàn giao. Muốn xem tiến trình thì mở popup, hoặc nhìn vòng trên
        * icon. Để panel ở lại là chắn mất video người dùng đang xem.
        */
+      /**
+       * Đường lùi cuối: nhờ yt-dlp tải từ URL xem của chính video đó.
+       *
+       * Dùng khi video không có progressive lẫn manifest. Gửi URL RIÊNG của
+       * video chứ không phải `location.href` — trang feed có nhiều video, gửi
+       * URL trang thì backend tải nhầm cái đầu tiên nó thấy.
+       */
+      async function startByPageUrl(row: FormatRow): Promise<void> {
+        setPending(true);
+        say('Đang giao cho app tải…');
+        let r: { ok: boolean; error?: string };
+        try {
+          r = await ask<{ ok: boolean; error?: string }>({
+            type: 'startByUrl',
+            url: row.pageUrl,
+            formatId: row.formatId || null,
+          });
+        } catch (err) {
+          say(err instanceof Error ? err.message : String(err), true);
+          setPending(false);
+          return;
+        }
+        if (!r.ok) {
+          say(r.error ?? 'Cần mở app Streamloot để tải video này', true);
+          setPending(false);
+          return;
+        }
+        mounted = false;
+        setPending(false);
+        root.style.display = 'none';
+        applyFabVisibility();
+      }
+
       /**
        * Mức chất lượng chỉ có trong manifest DASH — phải qua backend.
        *
@@ -674,6 +713,23 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
               manifestXml: v.manifestXml ?? undefined,
             }));
             addGroup('CHẤT LƯỢNG CAO (cần app)', '▲', hi);
+          }
+
+          // Không có mức nào đọc được: còn permalink thì nhờ yt-dlp.
+          if (!rows.length && !v.manifestXml) {
+            const pageUrl = v.permalinkUrl ?? watchUrl(v.id);
+            if (pageUrl) {
+              addGroup('VIDEO', '▭', [{
+                formatId: '',
+                label: 'Chất lượng tốt nhất',
+                detail: 'app tự chọn',
+                recommended: true,
+                name: 'Tốt nhất',
+                ext: 'mp4',
+                url: null,
+                pageUrl,
+              }]);
+            }
           }
         });
         return;

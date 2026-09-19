@@ -102,5 +102,14 @@ t('trang chỉ có một video thì không cần giải thích gì',
   () => listLabel({ matched: false, total: 1 }), 'Bấm một dòng để tải');
 t('trang không có video nào', () => listLabel({ matched: false, total: 0 }), 'Bấm một dòng để tải');
 
+// --- đường lùi cuối: không có progressive lẫn manifest thì còn permalink ---
+const bare = (id) => `{"__typename":"Video","length_in_second":12,"permalink_url":"https://www.facebook.com/watch/?v=${id}","media":{"id":"${id}","progressive_urls":[],"dash_manifests":[]}}`;
+t('video trơ trọi vẫn được giữ nếu dựng được URL xem',
+  () => extractVideos(page(bare('777'))).map((v) => v.id), ['777']);
+t('giữ permalink để nhờ yt-dlp',
+  () => extractVideos(page(bare('777')))[0].permalinkUrl, 'https://www.facebook.com/watch/?v=777');
+t('id không phải số thì KHÔNG giữ — không dựng nổi URL, giữ lại là dòng bấm không được',
+  () => extractVideos(page(`{"media":{"id":"abc","progressive_urls":[],"dash_manifests":[]}}`)), []);
+
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

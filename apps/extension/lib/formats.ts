@@ -30,6 +30,13 @@ export interface FormatRow {
   /** Tên file khi tải thẳng. Bắt buộc đi kèm `directUrl`. */
   fileName?: string;
   /**
+   * URL xem của CHÍNH video này, cho đường lùi nhờ yt-dlp.
+   *
+   * Khác `location.href`: trang feed có nhiều video, mỗi cái một permalink
+   * riêng. Gửi URL trang thì backend tải nhầm video đầu tiên nó thấy.
+   */
+  pageUrl?: string;
+  /**
    * Nguyên văn MPD, cho mức chất lượng chỉ có trong manifest DASH.
    *
    * Đường này PHẢI qua backend: DASH tách hình khỏi tiếng nên cần ghép, mà ghép

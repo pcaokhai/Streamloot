@@ -108,6 +108,16 @@ function nearestNumber(text: string, key: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * URL xem video, dựng từ id khi không tìm được `permalink_url`.
+ *
+ * Dùng cho đường dự phòng: yt-dlp nhận được dạng này. Không đoán đường dẫn
+ * nhóm hay trang — chỉ dạng chuẩn theo id.
+ */
+export function watchUrl(id: string): string | null {
+  return /^\d+$/.test(id) ? `https://www.facebook.com/watch/?v=${id}` : null;
+}
+
 interface RawDelivery {
   id?: string;
   progressive_urls?: { progressive_url?: string | null; metadata?: { quality?: string } }[];
@@ -156,7 +166,11 @@ export function extractVideos(html: string): FbVideo[] {
       }
     }
 
-    if (!progressive.length && !manifestXml) continue; // không có đường nào
+    // Không có progressive lẫn manifest thì VẪN giữ nếu còn permalink: yt-dlp ở
+    // backend tải được từ URL xem. Chỉ bỏ khi không còn đường nào — id rỗng thì
+    // không dựng nổi URL, mà giữ lại một mục không bấm được là nói dối người dùng.
+    const fallback = watchUrl(id);
+    if (!progressive.length && !manifestXml && !fallback) continue;
 
     const before = html.slice(Math.max(0, m.index - PARENT_WINDOW), m.index);
     if (nearestString(before, 'is_live_streaming') === 'true' ||
@@ -217,12 +231,3 @@ export function listLabel(o: { matched: boolean; total: number }): string {
   return `Không chắc video nào — hiện cả ${o.total} video trên trang`;
 }
 
-/**
- * URL xem video, dựng từ id khi không tìm được `permalink_url`.
- *
- * Dùng cho đường dự phòng: yt-dlp nhận được dạng này. Không đoán đường dẫn
- * nhóm hay trang — chỉ dạng chuẩn theo id.
- */
-export function watchUrl(id: string): string | null {
-  return /^\d+$/.test(id) ? `https://www.facebook.com/watch/?v=${id}` : null;
-}
