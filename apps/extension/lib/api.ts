@@ -34,6 +34,29 @@ export class BackendError extends Error {
   }
 }
 
+/**
+ * Lỗi kèm LÝ DO backend đưa ra, không chỉ mã số.
+ *
+ * Bản đầu chỉ ném `Backend trả 400`, nên mọi lỗi 4xx trông giống hệt nhau và
+ * người dùng không có gì để lần. FastAPI gửi lý do trong `detail` — vứt nó đi
+ * là tự bịt mắt mình.
+ */
+async function backendError(res: Response): Promise<BackendError> {
+  let detail = '';
+  try {
+    const body = await res.text();
+    try {
+      detail = (JSON.parse(body) as { detail?: string }).detail ?? body;
+    } catch {
+      detail = body;
+    }
+  } catch {
+    // Đọc body hỏng thì vẫn phải ném lỗi có mã — đừng nuốt luôn cả lỗi gốc.
+  }
+  detail = detail.trim().slice(0, 300);
+  return new BackendError(detail ? `Backend trả ${res.status}: ${detail}` : `Backend trả ${res.status}`, res.status);
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   let res: Response;
   try {
@@ -52,9 +75,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     // đã ghim — xảy ra khi build mất `key` trong manifest.
     throw new BackendError('App từ chối extension này. ID có khớp không?', res.status);
   }
-  if (!res.ok) {
-    throw new BackendError(`Backend trả ${res.status}`, res.status);
-  }
+  if (!res.ok) throw await backendError(res);
   return (await res.json()) as T;
 }
 
@@ -68,7 +89,7 @@ async function get<T>(path: string): Promise<T> {
   if (res.status === 401 || res.status === 403) {
     throw new BackendError('App từ chối extension này. ID có khớp không?', res.status);
   }
-  if (!res.ok) throw new BackendError(`Backend trả ${res.status}`, res.status);
+  if (!res.ok) throw await backendError(res);
   return (await res.json()) as T;
 }
 

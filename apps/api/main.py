@@ -869,8 +869,12 @@ def get_formats_prepared(payload: VideoInfoPayload):
         formats = YtDlpDownloader().list_formats(payload.to_video_info())
         return {"title": payload.title, "formats": formats}
     except subprocess.TimeoutExpired:
+        Logger.error(f"Liệt kê format quá giờ cho {payload.page_url}")
         raise HTTPException(status_code=504, detail="Timed out listing formats.")
     except (ValueError, RuntimeError) as e:
+        # Ghi log NỮA, không chỉ trả HTTP: lỗi trả qua HTTP không vào file log,
+        # nên khi người dùng báo "Backend trả 400" thì không còn dấu vết nào để lần.
+        Logger.error(f"Liệt kê format thất bại: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
 
 
