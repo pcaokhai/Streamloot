@@ -1,4 +1,4 @@
-import { extractPlayerResponse, formatsFromPlayerResponse, ytFormatId } from '../.tmp-youtube.mjs';
+import { extractPlayerResponse, formatsFromPlayerResponse, ytFormatId, playerResponseVideoId, currentVideoId, sameVideo } from '../.tmp-youtube.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -58,6 +58,24 @@ t('null không làm ném', () => formatsFromPlayerResponse(null), []);
 t('hình dạng khớp FormatOption',
   () => Object.keys(fs[0]).sort(),
   ['acodec', 'ext', 'filesize', 'format_id', 'height', 'recommended', 'resolution', 'url', 'vcodec'].sort());
+
+// --- đối chiếu id: SPA để lại dữ liệu của video TRƯỚC trong DOM ---
+t('đọc id từ videoDetails',
+  () => playerResponseVideoId({ videoDetails: { videoId: 'abc123' } }), 'abc123');
+t('không có videoDetails thì null', () => playerResponseVideoId({}), null);
+t('null không làm ném', () => playerResponseVideoId(null), null);
+t('id rỗng coi như không có', () => playerResponseVideoId({ videoDetails: { videoId: '' } }), null);
+
+t('lấy id từ URL đang mở',
+  () => currentVideoId('https://www.youtube.com/watch?v=xyz789&list=RD1'), 'xyz789');
+t('URL không có v thì null', () => currentVideoId('https://www.youtube.com/'), null);
+t('URL rác thì null, không ném', () => currentVideoId('khong-phai-url'), null);
+
+t('cùng id thì dùng được', () => sameVideo('abc', 'abc'), true);
+t('KHÁC id thì không dùng — đây là ca tải nhầm video sau khi chuyển bài',
+  () => sameVideo('abc', 'xyz'), false);
+t('trang không có ?v= thì cho qua, không chặn oan', () => sameVideo(null, 'abc'), true);
+t('dữ liệu không khai id thì cho qua', () => sameVideo('abc', null), true);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

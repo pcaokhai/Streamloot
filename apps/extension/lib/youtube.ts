@@ -24,6 +24,41 @@ interface RawFormat {
   audioQuality?: string;
 }
 
+/**
+ * Id video mà khối dữ liệu này nói về. `null` khi không đọc được.
+ *
+ * BẮT BUỘC phải đối chiếu với video đang mở. YouTube điều hướng kiểu SPA: bấm
+ * một bài trong Mix thì trang KHÔNG tải lại, nên khối `ytInitialPlayerResponse`
+ * cũ vẫn còn nguyên trong DOM — của video TRƯỚC. Dùng nó là hiện sai danh sách
+ * chất lượng và tải nhầm video, mà người dùng không có cách nào biết cho tới
+ * khi mở file ra xem.
+ */
+export function playerResponseVideoId(pr: unknown): string | null {
+  const id = (pr as { videoDetails?: { videoId?: unknown } })?.videoDetails?.videoId;
+  return typeof id === 'string' && id ? id : null;
+}
+
+/** Id video trong URL đang mở (`?v=`), hoặc `null`. */
+export function currentVideoId(href: string): string | null {
+  try {
+    return new URL(href).searchParams.get('v');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Khối dữ liệu đọc được có phải của video ĐANG MỞ không.
+ *
+ * Thiếu một trong hai id thì CHO QUA: trên trang không có `?v=` (Shorts, nhúng)
+ * ta không đối chiếu được, mà chặn hết thì mất luôn đường nhanh ở mọi trang đó.
+ * Chỉ chặn khi biết chắc hai bên khác nhau.
+ */
+export function sameVideo(urlId: string | null, dataId: string | null): boolean {
+  if (!urlId || !dataId) return true;
+  return urlId === dataId;
+}
+
 /** Cắt đúng khối JSON của `ytInitialPlayerResponse` ra khỏi HTML. */
 export function extractPlayerResponse(html: string): unknown | null {
   const at = html.indexOf('ytInitialPlayerResponse');

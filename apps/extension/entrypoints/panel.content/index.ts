@@ -19,7 +19,7 @@ import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRec
 import { groupFormats, qualityName } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
-import { extractPlayerResponse, formatsFromPlayerResponse } from '../../lib/youtube';
+import { extractPlayerResponse, formatsFromPlayerResponse, playerResponseVideoId, currentVideoId, sameVideo } from '../../lib/youtube';
 import { extractVideos, pickByDuration, listLabel, watchUrl } from '../../lib/facebook';
 import { parseMpd } from '../../lib/dash';
 import type { FbVideo } from '../../lib/facebook';
@@ -363,7 +363,12 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     function formatsFromPage(): FormatOption[] {
       try {
         const pr = extractPlayerResponse(document.documentElement.innerHTML);
-        return pr ? formatsFromPlayerResponse(pr) : [];
+        if (!pr) return [];
+        // Đối chiếu id: YouTube điều hướng SPA nên khối dữ liệu cũ còn nguyên
+        // trong DOM sau khi đã chuyển sang video khác. Lệch id thì coi như
+        // KHÔNG có — thà đi đường chậm còn hơn tải nhầm video.
+        if (!sameVideo(currentVideoId(location.href), playerResponseVideoId(pr))) return [];
+        return formatsFromPlayerResponse(pr);
       } catch (err) {
         console.warn('[Streamloot] đọc danh sách từ trang hỏng:', err);
         return [];

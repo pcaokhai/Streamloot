@@ -108,6 +108,38 @@ function rowFor(f: FormatOption): FormatRow {
  * Video sắp từ cao xuống thấp vì người dùng gần như luôn tìm chất lượng cao
  * nhất trước.
  */
+/**
+ * Gộp các dòng nhìn GIỐNG HỆT nhau.
+ *
+ * yt-dlp trả nhiều biến thể cùng một chiều cao — khác codec (avc1/vp9/av01),
+ * khác fps, khác bitrate. Panel chỉ hiện chiều cao và đuôi file, nên chúng hiện
+ * ra thành 4–6 dòng trông y như nhau và người dùng không có cơ sở nào để chọn.
+ *
+ * Gộp theo (chiều cao, đuôi), giữ bản NẶNG NHẤT — dung lượng lớn hơn ở cùng độ
+ * phân giải nghĩa là bitrate cao hơn, tức nét hơn. Không biết dung lượng thì giữ
+ * bản gặp trước, vì thứ tự yt-dlp trả đã là từ tốt xuống.
+ */
+function dedupeRows(rows: FormatRow[]): FormatRow[] {
+  const best = new Map<string, FormatRow>();
+  for (const r of rows) {
+    const key = `${r.label}|${r.ext}`;
+    const cur = best.get(key);
+    if (!cur) {
+      best.set(key, r);
+      continue;
+    }
+    const size = (x: FormatRow) => {
+      const m = /([\d.]+)\s*(B|KB|MB|GB|TB)/.exec(x.detail);
+      if (!m) return -1;
+      const unit = { B: 0, KB: 1, MB: 2, GB: 3, TB: 4 }[m[2]] ?? 0;
+      return parseFloat(m[1]) * 1024 ** unit;
+    };
+    if (size(r) > size(cur)) best.set(key, { ...r, recommended: r.recommended || cur.recommended });
+    else if (r.recommended) best.set(key, { ...cur, recommended: true });
+  }
+  return [...best.values()];
+}
+
 export function groupFormats(formats: FormatOption[]): { video: FormatRow[]; audio: FormatRow[] } {
   const video: FormatOption[] = [];
   const audio: FormatOption[] = [];
@@ -116,5 +148,5 @@ export function groupFormats(formats: FormatOption[]): { video: FormatRow[]; aud
     else video.push(f);
   }
   video.sort((a, b) => (b.height ?? 0) - (a.height ?? 0));
-  return { video: video.map(rowFor), audio: audio.map(rowFor) };
+  return { video: dedupeRows(video.map(rowFor)), audio: dedupeRows(audio.map(rowFor)) };
 }

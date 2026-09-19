@@ -77,5 +77,25 @@ t('không có url thì null, không phải undefined',
   () => groupFormats([{ format_id: 'a', ext: 'mp4', resolution: '', height: 480, filesize: null, vcodec: 'v', acodec: 'a', recommended: false }]).video[0].url,
   null);
 
+// --- gộp dòng trùng: yt-dlp trả nhiều biến thể cùng chiều cao ---
+const vf = (h, ext, size, rec = false) => ({
+  format_id: `${h}-${ext}-${size}`, ext, resolution: '', height: h, filesize: size,
+  vcodec: 'v', acodec: 'a', recommended: rec,
+});
+t('bốn biến thể 1080p mp4 gộp còn một dòng',
+  () => groupFormats([vf(1080, 'mp4', 100), vf(1080, 'mp4', 200), vf(1080, 'mp4', 300), vf(1080, 'mp4', 150)]).video.length,
+  1);
+t('giữ bản NẶNG NHẤT — cùng độ phân giải thì nặng hơn là nét hơn',
+  () => groupFormats([vf(1080, 'mp4', 100), vf(1080, 'mp4', 3 * 1024 * 1024)]).video[0].detail,
+  'mp4 · 3.0 MB');
+t('khác đuôi thì KHÔNG gộp — người dùng phân biệt được',
+  () => groupFormats([vf(1080, 'mp4', 100), vf(1080, 'webm', 100)]).video.length, 2);
+t('khác chiều cao thì không gộp',
+  () => groupFormats([vf(1080, 'mp4', 100), vf(720, 'mp4', 100)]).video.length, 2);
+t('dấu khuyên chọn không bị mất khi gộp',
+  () => groupFormats([vf(1080, 'mp4', 999999), vf(1080, 'mp4', 100, true)]).video[0].recommended, true);
+t('không biết dung lượng thì giữ bản gặp trước',
+  () => groupFormats([vf(1080, 'mp4', null), vf(1080, 'mp4', null)]).video.length, 1);
+
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
