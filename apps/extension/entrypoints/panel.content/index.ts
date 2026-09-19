@@ -16,11 +16,12 @@ import './style.css';
 import type { Capture, FormatOption, VideoInfoPayload } from '../../lib/types';
 import { pickCapture } from '../../lib/pick';
 import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, HOVER_FRESH_MS, HOVER_TICK_MS } from '../../lib/anchor';
-import { groupFormats } from '../../lib/formats';
+import { groupFormats, qualityName } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
 import { extractPlayerResponse, formatsFromPlayerResponse } from '../../lib/youtube';
 import { extractVideos } from '../../lib/facebook';
+import { parseMpd } from '../../lib/dash';
 import type { FbVideo } from '../../lib/facebook';
 import { downloadName } from '../../lib/filename';
 
@@ -482,7 +483,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         el.append(c1, c2, c3);
         el.onclick = () => {
           if (!canSubmit(pending)) return; // đang bay — bấm thêm không làm gì
-          void (row.directUrl ? saveDirect(row) : startDownload(row));
+          void (row.directUrl ? saveDirect(row) : row.manifestXml ? startByManifest(row) : startDownload(row));
         };
         rowEls.push(el);
         list.append(el);
@@ -507,6 +508,42 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
        * sau khi bàn giao. Muốn xem tiến trình thì mở popup, hoặc nhìn vòng trên
        * icon. Để panel ở lại là chắn mất video người dùng đang xem.
        */
+      /**
+       * Mức chất lượng chỉ có trong manifest DASH — phải qua backend.
+       *
+       * DASH tách hình khỏi tiếng nên cần ghép. Ghép trong trình duyệt thì phải
+       * nhúng ffmpeg-wasm (~5 MB), cái giá ADR 0007 D3 đã từ chối. Backend có
+       * ffmpeg thật và nhanh hơn hẳn.
+       */
+      async function startByManifest(row: FormatRow): Promise<void> {
+        setPending(true);
+        say('Đang giao cho app tải…');
+        let r: { ok: boolean; error?: string };
+        try {
+          r = await ask<{ ok: boolean; error?: string }>({
+            type: 'startByManifest',
+            manifestXml: row.manifestXml,
+            title: document.title,
+            url: location.href,
+            formatId: row.formatId || null,
+          });
+        } catch (err) {
+          say(err instanceof Error ? err.message : String(err), true);
+          setPending(false);
+          return;
+        }
+        if (!r.ok) {
+          // Đường này cần app đang chạy — nói rõ thay vì để người dùng đoán.
+          say(r.error ?? 'Cần mở app Streamloot để tải mức này', true);
+          setPending(false);
+          return;
+        }
+        mounted = false;
+        setPending(false);
+        root.style.display = 'none';
+        applyFabVisibility();
+      }
+
       /**
        * Tải THẲNG bằng trình duyệt, không đụng tới backend (ADR 0007 D2).
        *
@@ -610,6 +647,27 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
             ? ` · ${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, '0')}`
             : '';
           addGroup(embedded.length > 1 ? `VIDEO ${i + 1}${dur}` : `VIDEO${dur}`, '▭', rows);
+
+          // Mức cao hơn nằm trong manifest DASH. Chọn theo CHIỀU CAO chứ không
+          // theo id: id do yt-dlp tự đặt, không đoán trước được.
+          if (v.manifestXml) {
+            const heights = [...new Set(
+              parseMpd(v.manifestXml)
+                .filter((r) => !r.audioOnly && r.height)
+                .map((r) => r.height as number),
+            )].sort((a, b) => b - a);
+            const hi: FormatRow[] = heights.map((h) => ({
+              formatId: `bv*[height=${h}]+ba/b[height=${h}]`,
+              label: `${h}p`,
+              detail: 'mp4',
+              recommended: false,
+              name: qualityName(h),
+              ext: 'mp4',
+              url: null,
+              manifestXml: v.manifestXml ?? undefined,
+            }));
+            addGroup('CHẤT LƯỢNG CAO (cần app)', '▲', hi);
+          }
         });
         return;
       }

@@ -4,6 +4,7 @@ import queue
 import secrets
 import signal
 import subprocess
+import tempfile
 import threading
 import uuid
 import json
@@ -288,6 +289,23 @@ class VideoInfoPayload(BaseModel):
         return VideoInfo(**self.model_dump())
 
 
+class ManifestDownloadRequest(BaseModel):
+    """
+    Tải từ manifest DASH client đã có sẵn trong tay.
+
+    Dành cho site nhúng thẳng MPD vào HTML trang (ADR 0007): extension đã có
+    nguyên văn XML, không cần ai tải lại. Ghi ra file tạm rồi để yt-dlp đọc —
+    đo thật: nó nhận đúng 9 luồng của một manifest Facebook và tự ghép hình
+    với tiếng, nên ta không phải tự dựng info.json.
+    """
+    manifest_xml: str
+    title: str
+    page_url: str
+    format_id: Optional[str] = None
+    concurrency: int = 4
+    output_dir: Optional[str] = None
+
+
 class PreparedDownloadRequest(BaseModel):
     video_info: VideoInfoPayload
     concurrency: int = 4
@@ -407,6 +425,67 @@ async def start_download(req: DownloadRequest, background_tasks: BackgroundTasks
         "task_id": task_id,
         "message": "Download started",
         # B13: EventSource không gửi được header, nên stream dùng token này.
+        "stream_token": issue_stream_token(task_id),
+    }
+
+
+#: Trần kích thước manifest nhận từ client. MPD thật đo được ~13KB; đặt rộng
+#: gấp nhiều lần nhưng vẫn chặn, vì đây là dữ liệu từ ngoài vào.
+MAX_MANIFEST_BYTES = 2 * 1024 * 1024
+
+
+def _run_manifest_task(task_id: str, req: PreparedDownloadRequest, mpd_path: str):
+    """Chạy như tải-đã-dựng-sẵn, rồi xoá file manifest tạm dù thành hay bại."""
+    try:
+        run_prepared_task(task_id, req)
+    finally:
+        try:
+            os.remove(mpd_path)
+        except OSError:
+            pass
+
+
+@app.post("/api/v1/downloads/manifest", dependencies=[Depends(verify_api_key)])
+async def start_manifest_download(req: ManifestDownloadRequest, background_tasks: BackgroundTasks):
+    """
+    Tải từ manifest DASH do client cung cấp.
+
+    Vì sao cần: có site nhúng MPD thẳng vào HTML và KHÔNG phục vụ nó qua URL nào
+    (ADR 0007 §1.1), nên không có gì để backend tự tải lại. Client gửi nguyên
+    văn XML sang đây.
+
+    `--enable-file-urls` chỉ bật cho ĐÚNG lời gọi này, trên ĐÚNG file ta vừa
+    ghi ra. Cờ đó cho phép yt-dlp đọc file cục bộ, nên không bao giờ được dùng
+    với đường dẫn đến từ client.
+    """
+    if not req.manifest_xml.lstrip().startswith("<"):
+        raise HTTPException(status_code=400, detail="manifest_xml không phải XML.")
+    if len(req.manifest_xml.encode("utf-8")) > MAX_MANIFEST_BYTES:
+        raise HTTPException(status_code=413, detail="Manifest quá lớn.")
+
+    fd, mpd_path = tempfile.mkstemp(prefix="streamloot-mpd-", suffix=".mpd")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(req.manifest_xml)
+
+    task_id = str(uuid.uuid4())
+    history.create_task(task_id, req.page_url, source="extension")
+
+    prepared = PreparedDownloadRequest(
+        video_info=VideoInfoPayload(
+            title=req.title,
+            # Đường dẫn do CHÍNH TA dựng, không phải từ client.
+            m3u8_url=f"file://{mpd_path}",
+            page_url=req.page_url,
+            extra_ytdlp_args=["--enable-file-urls"],
+        ),
+        concurrency=req.concurrency,
+        output_dir=req.output_dir,
+        format_id=req.format_id,
+    )
+    background_tasks.add_task(_run_manifest_task, task_id, prepared, mpd_path)
+    return {
+        "task_id": task_id,
+        "message": "Download started",
         "stream_token": issue_stream_token(task_id),
     }
 

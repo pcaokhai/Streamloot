@@ -29,6 +29,13 @@ export interface FormatRow {
   directUrl?: string;
   /** Tên file khi tải thẳng. Bắt buộc đi kèm `directUrl`. */
   fileName?: string;
+  /**
+   * Nguyên văn MPD, cho mức chất lượng chỉ có trong manifest DASH.
+   *
+   * Đường này PHẢI qua backend: DASH tách hình khỏi tiếng nên cần ghép, mà ghép
+   * trong trình duyệt thì phải nhúng ffmpeg-wasm — cái giá ADR 0007 D3 đã từ chối.
+   */
+  manifestXml?: string;
 }
 
 /**

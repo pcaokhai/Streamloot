@@ -111,7 +111,7 @@ chuỗi 7 MB. Chỉ đọc khi người dùng **mở panel**, không đọc theo
 | Thứ tự | Đường | Vì sao |
 |---|---|---|
 | 1 | `progressive` | Một URL, **đã có tiếng**, tải thẳng — không phải ghép gì |
-| 2 | `manifest_xml` → DASH | Chất lượng cao hơn nhiều, nhưng tách hình/tiếng nên phải ghép |
+| 2 | `manifest_xml` → DASH | Chất lượng cao hơn nhiều, nhưng tách hình/tiếng nên phải ghép — xem D7 |
 | 3 | `permalink_url` / `watch/?v=<id>` | Nhờ backend + yt-dlp |
 
 ### D3. KHÔNG nhúng ffmpeg-wasm
@@ -274,3 +274,43 @@ hẹp vì lý do KHÔNG phải kỹ thuật, phải ghi rõ mình vừa bỏ m�
 
 ---
 
+
+
+---
+
+## 7. D7 — Đường DASH: gửi manifest sang backend
+
+**Vấn đề.** Progressive dừng ở mức `HD`. Manifest DASH có tới 8 mức, đo được
+1200–2560p. Nhưng DASH tách hình khỏi tiếng nên phải ghép.
+
+**Đo trước khi thiết kế.** yt-dlp có đọc được MPD từ file cục bộ không?
+
+```
+$ yt-dlp --enable-file-urls -F file:///tmp/fb.mpd
+9 format: 8 luồng hình (av01, tới 1200p) + 1 luồng tiếng (mp4a)
+nhận đúng là "DASH video" / "DASH audio"
+```
+
+**Đọc được.** Nên không phải tự dựng `info.json`: gửi nguyên văn XML sang
+backend, ghi ra file tạm, yt-dlp tự chọn luồng và tự ghép bằng ffmpeg thật.
+
+Không dùng được hai dạng khác: đường dẫn trần bị từ chối (`không phải URL hợp
+lệ`), còn `file://` mặc định bị tắt vì lý do an toàn.
+
+**Endpoint** `POST /api/v1/downloads/manifest` nhận `{manifest_xml, title,
+page_url, format_id}`.
+
+**Ràng buộc an toàn.** `--enable-file-urls` cho yt-dlp đọc file cục bộ, nên:
+- chỉ bật cho ĐÚNG lời gọi này, trên ĐÚNG file backend vừa ghi ra;
+- đường dẫn do **backend** dựng, không bao giờ lấy từ client;
+- chặn đầu vào: phải bắt đầu bằng `<`, và trần 2 MB (MPD thật ~13 KB);
+- xoá file tạm trong `finally` — hỏng mà để lại là rác tích dần.
+
+**Chọn theo CHIỀU CAO, không theo id.** `bv*[height=H]+ba/b[height=H]`: id của
+luồng do yt-dlp tự đặt từ manifest, không đoán trước được từ phía extension.
+
+**Đánh đổi — nói rõ trong giao diện.** Nhóm này ghi "CHẤT LƯỢNG CAO (cần app)":
+khác progressive, đường này **đòi app Streamloot đang chạy**. Người dùng thấy
+trước khi bấm, thay vì bấm rồi mới nhận lỗi.
+
+9 test cho endpoint, gồm cả hai ca xoá file tạm (tải xong, và tải hỏng).

@@ -154,6 +154,9 @@ export default defineBackground(() => {
       taskId?: string;
       /** Tên file khi tải thẳng bằng trình duyệt (saveDirect). */
       filename?: string;
+      /** Nguyên văn MPD cho đường startByManifest. */
+      manifestXml?: string;
+      title?: string;
       /** URL trang, cho đường hỏi yt-dlp trực tiếp (formatsByUrl / startByUrl). */
       url?: string;
     };
@@ -194,6 +197,21 @@ export default defineBackground(() => {
 
     if (m?.type === 'formatsByUrl' && typeof m.url === 'string') {
       return formatsByUrl(m.url);
+    }
+
+    if (m?.type === 'startByManifest' && typeof m.manifestXml === 'string') {
+      return api
+        .startDownloadByManifest({
+          manifestXml: m.manifestXml,
+          title: m.title ?? '',
+          pageUrl: m.url ?? '',
+          formatId: m.formatId ?? null,
+        })
+        .then(({ task_id }) => {
+          runTick();
+          return { ok: true as const, taskId: task_id };
+        })
+        .catch((e: unknown) => ({ ok: false as const, error: errorText(e) }));
     }
 
     if (m?.type === 'saveDirect' && typeof m.url === 'string' && typeof m.filename === 'string') {

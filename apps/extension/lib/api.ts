@@ -178,6 +178,27 @@ export function getFormatsByUrl(url: string): Promise<{ title: string; formats: 
 }
 
 /**
+ * Tải từ manifest DASH extension đã có sẵn trong tay.
+ *
+ * Dùng cho site nhúng MPD thẳng vào HTML và không phục vụ nó qua URL nào
+ * (ADR 0007). Backend ghi XML ra file tạm rồi để yt-dlp đọc — nó tự chọn luồng
+ * và tự ghép hình với tiếng, nên phía này không phải dựng gì.
+ */
+export function startDownloadByManifest(o: {
+  manifestXml: string;
+  title: string;
+  pageUrl: string;
+  formatId: string | null;
+}): Promise<StartResult> {
+  return post<StartResult>('/downloads/manifest', {
+    manifest_xml: o.manifestXml,
+    title: o.title,
+    page_url: o.pageUrl,
+    ...(o.formatId ? { format_id: o.formatId } : {}),
+  });
+}
+
+/**
  * B9 — đường lùi: gửi URL trần để app tự extract bằng plugin headless.
  * Dùng khi extension không bắt được manifest (site cần tương tác mới lộ stream,
  * ADR 0005 §2.3). Chậm hơn nhiều nhưng còn hơn là bó tay.
