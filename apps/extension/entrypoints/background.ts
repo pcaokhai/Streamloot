@@ -16,12 +16,23 @@ import { BackendError } from '../lib/api';
 import { applyIconState, flashCompleted } from '../lib/icon';
 import { cacheTasks } from '../lib/cache';
 import { nextPollMs, pickRingTask, shouldCacheFormatFailure } from '../lib/tasks';
+import { contentLengthOf, contentTypeOf, mediaKind, worthCapturing } from '../lib/capture';
 import { canSetHeaders, dirFilter, withHeaders } from '../lib/dnr';
 import { hasSeparateAudio, isMaster, isSubtitlePlaylist, parseMaster, siblingMasterUrl, variantsToFormats } from '../lib/m3u8';
 import type { Capture, FormatOption, TaskRecord, VideoInfoPayload } from '../lib/types';
 
 const MANIFEST_URL = /\.(m3u8|mpd)(\?|$)/i;
-const MANIFEST_TYPE = /(mpegurl|dash\+xml)/i;
+
+/**
+ * Header của request media đang bay, chờ ghép với response.
+ *
+ * Phải ghép hai listener: `Referer`/`Origin` chỉ có ở lúc GỬI, còn
+ * `Content-Length` — thứ duy nhất phân biệt phim với quảng cáo — chỉ có ở lúc
+ * NHẬN. Khoá theo `requestId`.
+ */
+const pendingHeaders = new Map<string, { referer?: string; origin?: string; userAgent?: string; page: string }>();
+/** Trần để một trang lắm request không làm phình bộ nhớ service worker. */
+const PENDING_MAX = 200;
 
 const keyFor = (tabId: number) => `captures:${tabId}`;
 
@@ -101,18 +112,36 @@ export default defineBackground(() => {
   // theo mặc định.
   browser.webRequest.onSendHeaders.addListener(
     (d) => {
-      if (d.tabId < 0 || !MANIFEST_URL.test(d.url)) return;
+      if (d.tabId < 0) return;
       const header = (n: string) =>
         d.requestHeaders?.find((h) => h.name.toLowerCase() === n)?.value;
-      void addCapture(d.tabId, {
-        page: pageOf(d),
-        host: new URL(d.url).hostname,
-        url: d.url,
-        title: '',
+
+      // Manifest: bắt NGAY theo đuôi URL, như trước. Nó là file text nhỏ, không
+      // cần đợi kích thước, và bắt sớm thì panel có dữ liệu sớm.
+      if (MANIFEST_URL.test(d.url)) {
+        void addCapture(d.tabId, {
+          page: pageOf(d),
+          host: new URL(d.url).hostname,
+          url: d.url,
+          title: '',
+          referer: header('referer'),
+          origin: header('origin'),
+          userAgent: header('user-agent'),
+          at: Date.now(),
+        });
+        return;
+      }
+
+      // Còn lại: chỉ GHI NHỚ header, chờ response mới biết có đáng bắt không.
+      if (mediaKind(d.url) === null) return;
+      if (pendingHeaders.size >= PENDING_MAX) {
+        pendingHeaders.delete(pendingHeaders.keys().next().value as string);
+      }
+      pendingHeaders.set(d.requestId, {
         referer: header('referer'),
         origin: header('origin'),
         userAgent: header('user-agent'),
-        at: Date.now(),
+        page: pageOf(d),
       });
     },
     { urls: ['<all_urls>'] },
@@ -123,14 +152,24 @@ export default defineBackground(() => {
   // đích thì đường này chưa từng khớp, nhưng giữ vì rẻ và phòng site khác.
   browser.webRequest.onHeadersReceived.addListener(
     (d): undefined => {
+      const stashed = pendingHeaders.get(d.requestId);
+      pendingHeaders.delete(d.requestId);
       if (d.tabId < 0 || MANIFEST_URL.test(d.url)) return undefined;
-      const ct = d.responseHeaders?.find((h) => h.name.toLowerCase() === 'content-type')?.value;
-      if (!ct || !MANIFEST_TYPE.test(ct)) return undefined;
+
+      const ct = contentTypeOf(d.responseHeaders);
+      const kind = mediaKind(d.url, ct);
+      // Ngưỡng kích thước loại quảng cáo: đo được 1.7–2.4MB trên một site thật.
+      if (!worthCapturing({ kind, contentLength: contentLengthOf(d.responseHeaders) })) {
+        return undefined;
+      }
       void addCapture(d.tabId, {
-        page: pageOf(d),
+        page: stashed?.page ?? pageOf(d),
         host: new URL(d.url).hostname,
         url: d.url,
         title: '',
+        referer: stashed?.referer,
+        origin: stashed?.origin,
+        userAgent: stashed?.userAgent,
         at: Date.now(),
       });
       return undefined;
