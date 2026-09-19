@@ -778,6 +778,38 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         return;
       }
 
+      // Capture là FILE HOÀN CHỈNH (MP4/WebM): không có danh sách nào để lấy.
+      //
+      // Hỏi backend ở đây là treo panel ở "Đang lấy danh sách chất lượng…" cho
+      // tới khi hết giờ — đúng lỗi đã gặp. Hiện ngay một dòng tải thẳng.
+      if (cap?.kind === 'progressive') {
+        const ext = (cap.url.split('?')[0].split('.').pop() ?? 'mp4').slice(0, 4);
+        say('Bấm một dòng để tải');
+        addGroup('VIDEO', '▭', [{
+          formatId: '',
+          label: 'Chất lượng gốc',
+          detail: ext,
+          recommended: true,
+          name: 'Gốc',
+          ext,
+          url: null,
+          directUrl: cap.url,
+          fileName: downloadName({ title: document.title, id: cap.host, ext }),
+        }]);
+        // Đường qua app làm dự phòng: nó gửi kèm Referer đã bắt được, nên chạy
+        // được cả khi CDN từ chối lượt tải thẳng của trình duyệt (thiếu Referer).
+        addGroup('NẾU TẢI THẲNG BỊ CHẶN', '▲', [{
+          formatId: '',
+          label: 'Tải qua app',
+          detail: 'gửi kèm Referer',
+          recommended: false,
+          name: 'Qua app',
+          ext,
+          url: null,
+        }]);
+        return;
+      }
+
       // Trang tự mang sẵn danh sách chất lượng (YouTube). Đọc được thì khỏi
       // phải đợi backend chạy yt-dlp hai lần. Tải thì vẫn giao cho backend —
       // nó lo phần giải chữ ký — nên đây thuần tuý là rút ngắn phần CHỜ.

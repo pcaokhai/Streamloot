@@ -66,6 +66,17 @@ export interface Capture {
   host: string;
   url: string;
   title: string;
+  /**
+   * `'progressive'` = file hoàn chỉnh (MP4/WebM), tải thẳng được.
+   * `'manifest'` = m3u8/mpd, phải hỏi mới biết có những mức nào.
+   *
+   * Thiếu trường này thì panel đi hỏi backend cho CẢ HAI loại — mà với
+   * progressive thì không có danh sách nào để lấy, nên nó treo ở
+   * "Đang lấy danh sách chất lượng…" cho tới khi hết giờ.
+   *
+   * `undefined` ở bản cache cũ: coi như manifest, đúng hành vi trước đây.
+   */
+  kind?: 'manifest' | 'progressive';
   referer?: string;
   origin?: string;
   userAgent?: string;
