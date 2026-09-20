@@ -15,7 +15,7 @@
 import './style.css';
 import type { Capture, FormatOption, VideoInfoPayload } from '../../lib/types';
 import { pickCapture } from '../../lib/pick';
-import { pickAnchor, rectHas, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, HOVER_FRESH_MS, HOVER_TICK_MS } from '../../lib/anchor';
+import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, HOVER_FRESH_MS, HOVER_TICK_MS } from '../../lib/anchor';
 import { groupFormats, qualityName } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
@@ -27,7 +27,6 @@ import { parseMpd } from '../../lib/dash';
 import type { FbVideo } from '../../lib/facebook';
 import { downloadName } from '../../lib/filename';
 import { deeperPermalink } from '../../lib/permalink';
-import { collectPhotos, photoExt, photoIndex, MIN_PHOTO_PX, type PhotoEl } from '../../lib/gallery';
 
 /**
  * Panel KHÔNG gọi HTTP trực tiếp.
@@ -145,12 +144,11 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     const fab = document.createElement('div');
     fab.className = 'sl-fab';
     fab.textContent = '⤓';
-    fab.title = 'Tải video/ảnh này bằng Streamloot';
+    fab.title = 'Tải video này bằng Streamloot';
     fab.style.width = `${BTN_SIZE}px`;
     fab.style.height = `${BTN_SIZE}px`;
 
-    /** Video hoặc ảnh đang neo nút. Ảnh: bài nhiều ảnh cũng tải được (§ẢNH). */
-    let anchored: HTMLVideoElement | HTMLImageElement | null = null;
+    let anchored: HTMLVideoElement | null = null;
 
     // Nút chỉ hiện khi rê chuột vào video, nán lại FAB_HIDE_MS rồi ẩn — như
     // thanh nút của Cốc Cốc. Quyết định ẩn/hiện nằm ở shouldHideFab (có test);
@@ -205,15 +203,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
      * Gộp theo rAF: mousemove bắn hàng trăm lần mỗi giây, còn
      * getBoundingClientRect thì ép trình duyệt tính lại layout.
      */
-    /**
-     * Vị trí con trỏ lần cuối, để `place()` biết neo vào cái nào.
-     *
-     * Không có nó thì trên feed nút luôn nhảy về video đang phát ở bài khác —
-     * đúng lỗi "bài ảnh không có nút tải" đo được ngày 20/09.
-     */
-    let cursor: { x: number; y: number } | null = null;
-    /** Khung bài mà panel đang mở cho. Giữ nút đứng yên trong lúc panel mở. */
-    let panelBox: Element | null = null;
     let moveQueued = false;
     function onMove(ev: MouseEvent): void {
       if (moveQueued) return;
@@ -221,7 +210,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       const { clientX: x, clientY: y } = ev;
       requestAnimationFrame(() => {
         moveQueued = false;
-        cursor = { x, y };
         // Phần tử neo có thể đã bị player thay mất (SPA dựng lại <video> sau khi
         // bắt đầu tải). Node rời DOM trả rect toàn số 0 mà không báo gì, nên
         // nếu cứ tin vào nó thì nút ẩn vĩnh viễn. Thấy rect hỏng thì neo lại.
@@ -236,19 +224,8 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         if (!fab.classList.contains('sl-hidden')) rects.push(fab.getBoundingClientRect());
         // Vùng đệm bằng cả nút + lề: nút nằm NGOÀI mép trên video, nên đường đi
         // từ video lên tới nút không được tính là "đã rời video".
-        if (isOverRect({ x, y }, rects, BTN_SIZE + BTN_PAD)) {
-          markOver();
-          return;
-        }
-        applyFabVisibility();
-        // Ra hẳn khỏi vùng giữ nút: neo lại theo vị trí mới, nhờ vậy nút đi
-        // theo người dùng khi họ lướt từng bài.
-        //
-        // Phải nằm SAU phép kiểm trên, không phải trước. Bản đầu neo lại ngay
-        // khi con trỏ rời hình — mà chính cái nút lại nằm NGOÀI hình, nên rê
-        // tay tới nút là neo lại sang bài khác và nút chạy mất trước khi bấm
-        // được.
-        if (!mounted) place();
+        if (isOverRect({ x, y }, rects, BTN_SIZE + BTN_PAD)) markOver();
+        else applyFabVisibility();
       });
     }
     document.addEventListener('mousemove', onMove, { passive: true, capture: true });
@@ -273,60 +250,12 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
 
     /** Đo lại và đặt nút. Gọi từ observer, không từ bộ đếm. */
     function place(): void {
-      // Panel đang mở thì KHOÁ phần tử neo, chỉ đo lại vị trí của nó.
-      //
-      // Lúc lướt carousel, trang dựng lại DOM liên tục nên observer gọi place()
-      // hàng chục lần; chọn lại mỗi lần là nút nhảy loạn giữa các bài — và tệ
-      // hơn, panel đang hiện ảnh của bài A lại treo trên bài B.
-      if (mounted && panelBox?.isConnected) {
-        const r = panelBox.getBoundingClientRect();
-        if (isUsableRect(r)) {
-          const p = buttonPos(r, BTN_SIZE, BTN_PAD);
-          fab.style.top = `${p.top}px`;
-          fab.style.left = `${p.left}px`;
-          placePanel(p);
-          applyFabVisibility();
-          return;
-        }
-      }
-      // Ảnh cũng là ứng viên neo: bài chỉ có ảnh thì trước đây không có nút nào
-      // cả, nên người dùng không có đường nào tải. Video xếp trước ảnh để bài
-      // vừa có video vừa có ảnh thì nút vẫn về video (ca thường hơn hẳn).
       const vids = [...document.querySelectorAll('video')] as HTMLVideoElement[];
-      // Trên feed vừa có ảnh vừa có video, cái nào con trỏ đang trỏ vào thì neo
-      // vào cái đó — xem pickAnchor. Lọc trước theo `naturalWidth` (thuộc tính
-      // rẻ, không gây layout) để khỏi đo hàng trăm ảnh vặt mỗi nhịp cuộn.
-      // Lọc theo cỡ HIỆN TRÊN MÀN HÌNH, không theo cỡ gốc của file: avatar của
-      // Instagram là ảnh 320x320 hiển thị ở 32px. Lọc theo cỡ gốc thì nút neo
-      // vào avatar và nằm chệch hẳn sang trái bài — đúng lỗi đo được 20/09.
-      const imgs = ([...document.querySelectorAll('img')] as HTMLImageElement[]).filter((im) => {
-        const r = im.getBoundingClientRect();
-        return r.width >= MIN_PHOTO_PX && r.height >= MIN_PHOTO_PX;
-      });
-      const media: (HTMLVideoElement | HTMLImageElement)[] = [...vids, ...imgs];
-      const shaped = media.map((m) => ({
-        rect: m.getBoundingClientRect(),
-        playing: m instanceof HTMLVideoElement && !m.paused && !m.ended && m.readyState > 2,
+      const shaped = vids.map((v) => ({
+        rect: v.getBoundingClientRect(),
+        playing: !v.paused && !v.ended && v.readyState > 2,
       }));
-      // Con trỏ không nằm trên media nào: GIỮ neo cũ, chỉ đo lại vị trí.
-      //
-      // Bản trước lùi về luật "đang phát / lớn nhất", nên vừa đưa chuột ra khỏi
-      // ảnh là nút bay sang bài khác ở tận mép phải. Nhảy sang bài người dùng
-      // không nhìn thì chẳng để làm gì — nút sắp tự ẩn sau 5 giây rồi.
-      const at = cursor;
-      if (at && anchored?.isConnected && !shaped.some((m) => rectHas(m.rect, at))) {
-        const r = anchored.getBoundingClientRect();
-        if (isUsableRect(r)) {
-          const p = buttonPos(r, BTN_SIZE, BTN_PAD);
-          fab.style.top = `${p.top}px`;
-          fab.style.left = `${p.left}px`;
-          placePanel(p);
-          applyFabVisibility();
-          return;
-        }
-      }
-
-      const i = pickAnchor(shaped, { width: window.innerWidth, height: window.innerHeight }, cursor);
+      const i = pickAnchor(shaped, { width: window.innerWidth, height: window.innerHeight });
 
       let pos: { top: number; left: number };
       if (i < 0) {
@@ -335,7 +264,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         anchored = null;
         pos = { top: BTN_PAD, left: window.innerWidth - BTN_SIZE - BTN_PAD };
       } else {
-        anchored = media[i];
+        anchored = vids[i];
         pos = buttonPos(shaped[i].rect, BTN_SIZE, BTN_PAD);
       }
       fab.style.top = `${pos.top}px`;
@@ -548,16 +477,8 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         return deeperPermalink(location.href, hrefs);
       }
 
-      // Bài chỉ có ảnh: không có video, không có capture — nhưng vẫn tải được,
-      // nên panel phải mở. Trước đây guard bên dưới đóng thẳng, và người dùng
-      // không có đường nào để tải ảnh cả.
-      //
-      // KHÔNG phụ thuộc `cap`: capture gom theo TAB chứ không theo bài, nên khi
-      // trỏ vào ảnh mà feed có video ở bài khác thì panel hiện nhầm danh sách
-      // video của bài đó — đúng lỗi đo được 20/09.
-      const photoMode = anchored instanceof HTMLImageElement;
       const byUrl = !cap;
-      if (byUrl && !photoMode && !hasVideo()) return;
+      if (byUrl && !hasVideo()) return;
 
       // Trên feed (Instagram, Facebook…), `location.href` là trang chủ: gửi nó
       // cho yt-dlp thì nhận "Unsupported URL". Link riêng của video nằm ngay
@@ -628,9 +549,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         el.append(c1, c2, c3);
         el.onclick = () => {
           if (!canSubmit(pending)) return; // đang bay — bấm thêm không làm gì
-          void (row.photos
-            ? savePhotos(row)
-            : row.directUrl
+          void (row.directUrl
             ? saveDirect(row)
             : row.manifestXml
             ? startByManifest(row)
@@ -736,52 +655,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
        * Dùng cho URL là file hoàn chỉnh đã có sẵn tiếng. Chạy được cả khi app
        * Streamloot chưa mở — đó là cả điểm của đường này.
        */
-      /**
-       * Tải cả bộ ảnh, mỗi ảnh một lượt `chrome.downloads`.
-       *
-       * Tải tuần tự chứ không song song: `downloads.download` bắn song song
-       * hàng chục lượt thì Chrome dựng hộp thoại hỏi quyền, và người dùng thấy
-       * như app bị treo.
-       *
-       * Một ảnh hỏng KHÔNG dừng cả bộ — bỏ dở ở ảnh thứ ba là tệ hơn hẳn việc
-       * báo "tải được 3/4".
-       */
-      async function savePhotos(row: FormatRow): Promise<void> {
-        const photos = row.photos ?? [];
-        setPending(true);
-        let done = 0;
-        for (const [i, url] of photos.entries()) {
-          say(`Đang tải ảnh ${i + 1}/${photos.length}…`);
-          try {
-            const r = await ask<{ ok: boolean; error?: string }>({
-              type: 'saveDirect',
-              url,
-              filename: downloadName({
-                title: photoIndex(i, photos.length),
-                id: String(i + 1),
-                folder: row.photoFolder,
-                ext: photoExt(url),
-              }),
-            });
-            if (r.ok) done += 1;
-          } catch {
-            // nuốt có chủ đích: đếm ở `done`, báo tổng kết bên dưới
-          }
-        }
-        setPending(false);
-        if (!done) {
-          say('Không tải được ảnh nào', true);
-          return;
-        }
-        if (done < photos.length) {
-          say(`Tải được ${done}/${photos.length} ảnh`, true);
-          return;
-        }
-        mounted = false;
-        root.style.display = 'none';
-        applyFabVisibility();
-      }
-
       async function saveDirect(row: FormatRow): Promise<void> {
         setPending(true);
         say('Đang giao cho trình duyệt tải…');
@@ -860,7 +733,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         //
         // Không chắc thì hiện cả danh sách, KHÔNG đoán: đưa nhầm video là thứ
         // người dùng không có cách nào tự phát hiện trước khi tải xong.
-        const dur = anchored instanceof HTMLVideoElement ? anchored.duration : NaN;
+        const dur = anchored?.duration ?? NaN;
         const hit = pickByDuration(all, dur);
         const embedded = hit >= 0 ? [all[hit]] : all;
         say(listLabel({ matched: hit >= 0, total: all.length }));
@@ -929,100 +802,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         return;
       }
 
-      /**
-       * Nút "sang ảnh kế" của carousel.
-       *
-       * Tìm theo aria-label vì đó là thứ DUY NHẤT ổn định: tên class của trang
-       * là chuỗi băm, đổi mỗi lần họ build lại. Không thấy thì coi như hết ảnh
-       * — thà tải phần đã có còn hơn báo lỗi trắng.
-       */
-      function nextSlideButton(box: Element): HTMLElement | null {
-        for (const b of box.querySelectorAll('button,[role="button"]')) {
-          const label = b.getAttribute('aria-label') ?? '';
-          if (/next|tiếp|sau/i.test(label) && b instanceof HTMLElement) return b;
-        }
-        return null;
-      }
-
-      /** Ảnh đang hiện trong khung bài, đo ngay tại thời điểm gọi. */
-      function snapPhotos(box: Element, into: PhotoEl[]): void {
-        for (const im of box.querySelectorAll('img')) {
-          // Cỡ GỐC, không phải cỡ trên màn hình: lúc lướt, slide đang trượt vào
-          // có bề rộng hiển thị bằng 0 hoặc đang co giãn. Đo theo đó thì ảnh
-          // thật bị loại — đo thật: bài 4 ảnh chỉ gom được 2.
-          into.push({
-            src: im.currentSrc || im.src,
-            srcset: im.getAttribute('srcset'),
-            width: im.naturalWidth,
-            height: im.naturalHeight,
-          });
-        }
-      }
-
-      /**
-       * Chụp cho tới khi có ảnh mới, tối đa ~3 giây.
-       *
-       * Chờ cứng một khoảng là sai cách: mạng chậm thì mất ảnh, mạng nhanh thì
-       * phí thời gian. Điều kiện dừng phải là thứ ta thật sự cần — một ảnh mới.
-       */
-      async function waitForNewPhoto(box: Element, shots: PhotoEl[], known: number): Promise<number> {
-        for (let t = 0; t < 20; t += 1) {
-          await new Promise((r) => setTimeout(r, 150));
-          snapPhotos(box, shots);
-          const n = collectPhotos(shots).length;
-          if (n > known) return n;
-        }
-        return collectPhotos(shots).length;
-      }
-
-      if (photoMode && anchored instanceof HTMLImageElement) {
-        // Khung bài: `<article>` là thẻ ngữ nghĩa cho "một bài", không phải một
-        // lớp CSS của riêng site nào.
-        const box = anchored.closest('article') ?? anchored.parentElement;
-        say('Đang xem bài có mấy ảnh…');
-        void (async () => {
-          const shots: PhotoEl[] = [];
-          if (box) {
-            snapPhotos(box, shots);
-            // Carousel chỉ render slide đang xem, nên phải lướt qua mới thấy
-            // hết. Dừng khi một lượt không ra ảnh mới (carousel vòng tròn thì
-            // nút "next" không bao giờ biến mất), chặn trên 20 lượt.
-            let known = collectPhotos(shots).length;
-            for (let i = 0; i < 20; i += 1) {
-              const next = nextSlideButton(box);
-              if (!next) break;
-              next.click();
-              // Chờ theo KẾT QUẢ, không theo đồng hồ. Bản trước ngủ 450ms rồi
-              // chụp: ảnh nào tải chậm hơn thế là mất, và bài 4 ảnh ra 2. Ảnh
-              // chưa tải xong thì `naturalWidth` bằng 0 nên cũng không đếm.
-              const now = await waitForNewPhoto(box, shots, known);
-              if (now === known) break;
-              known = now;
-              say(`Đang gom ảnh… (${known})`);
-            }
-          }
-          const photos = collectPhotos(shots);
-          if (!photos.length) {
-            say('Không thấy ảnh nào tải được', true);
-            return;
-          }
-          const base = cleanTitle(document.title, location.hostname);
-          addGroup('ẢNH', '▣', [{
-            formatId: '',
-            label: `${photos.length} ảnh`,
-            detail: photoExt(photos[0]),
-            recommended: true,
-            name: 'Tải tất cả',
-            ext: photoExt(photos[0]),
-            url: null,
-            photos,
-            photoFolder: `${brandOf(location.hostname)}/${base}`,
-          }]);
-          say('Bấm một dòng để tải');
-        })();
-        return;
-      }
-
       // Capture là FILE HOÀN CHỈNH (MP4/WebM): không có danh sách nào để lấy.
       //
       // Hỏi backend ở đây là treo panel ở "Đang lấy danh sách chất lượng…" cho
@@ -1032,7 +811,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         // Độ phân giải lấy từ chính thẻ <video> đang phát: capture không mang
         // thông tin đó, nhưng trình duyệt thì biết. Nhờ vậy dòng hiện đúng tên
         // mức ("Full HD", "HD"…) thay vì một chữ "Gốc" chung chung.
-        const h = anchored instanceof HTMLVideoElement ? anchored.videoHeight : 0;
+        const h = anchored?.videoHeight || 0;
         // Không đọc được chiều cao thì gọi là "Tiêu chuẩn" và để trống cột độ
         // phân giải — bịa một con số ở đó còn tệ hơn là không nói gì.
         const name = qualityName(h) || 'Tiêu chuẩn';
@@ -1131,10 +910,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // ui.mount() đã chạy ngay từ đầu (để nút hiện ra) — bấm nút chỉ còn việc
       // mở panel ra và vẽ nội dung, không cần mount lại.
       mounted = true;
-      // Neo panel vào cả BÀI, không vào riêng tấm ảnh: lướt carousel là trang
-      // tháo tấm ảnh cũ khỏi DOM, và lúc đó phần tử neo biến mất khiến nút
-      // nhảy sang bài khác giữa chừng.
-      panelBox = anchored?.closest('article') ?? anchored;
       applyFabVisibility();
       // Đặt panel theo vị trí HIỆN TẠI của nút trước khi hiện — nút có thể đã
       // dời chỗ từ lần placePanel gần nhất mà panel lúc đó chưa được mount.

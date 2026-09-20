@@ -39,13 +39,8 @@ export function downloadName(o: {
   const q = sanitize(o.quality ?? '');
   const ext = (o.ext ?? 'mp4').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'mp4';
   const name = q ? `${base} (${q}).${ext}` : `${base}.${ext}`;
-  // Thư mục theo site (và theo bài, với bài nhiều ảnh). Làm sạch TỪNG đoạn:
-  // `sanitize` biến `/` thành `_`, nên dấu `/` còn lại chỉ có thể là dấu ngăn
-  // thư mục mà chính ta đặt — không có đường nào để tên file tự tạo thư mục.
-  const dir = (o.folder ?? '')
-    .split('/')
-    .map(sanitize)
-    .filter(Boolean)
-    .join('/');
+  // Thư mục theo site, cùng quy ước với bên app; sanitize trước vì `sanitize`
+  // biến `/` thành `_`, nên dấu `/` duy nhất còn lại là dấu ngăn thư mục.
+  const dir = sanitize(o.folder ?? '');
   return dir ? `${dir}/${name}` : name;
 }

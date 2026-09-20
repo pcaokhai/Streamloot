@@ -35,11 +35,6 @@ export const MIN_VIDEO_PX = 120;
 
 const area = (r: Rect) => r.width * r.height;
 
-/** Điểm có nằm trong khung không. Mép tính là nằm trong. */
-export function rectHas(r: Rect, p: { x: number; y: number }): boolean {
-  return p.x >= r.left && p.x <= r.left + r.width && p.y >= r.top && p.y <= r.top + r.height;
-}
-
 function inViewport(r: Rect, view: { width: number; height: number }): boolean {
   return r.top < view.height && r.top + r.height > 0 && r.left < view.width && r.left + r.width > 0;
 }
@@ -54,11 +49,7 @@ function inViewport(r: Rect, view: { width: number; height: number }): boolean {
  * Lọc theo khung nhìn CHỈ KHI còn ứng viên: video cuộn khuất vẫn hơn là không
  * có nút nào.
  */
-export function pickAnchor(
-  videos: VideoLike[],
-  viewport: { width: number; height: number },
-  cursor?: { x: number; y: number } | null,
-): number {
+export function pickAnchor(videos: VideoLike[], viewport: { width: number; height: number }): number {
   const idx = videos
     .map((v, i) => i)
     .filter((i) => {
@@ -66,17 +57,6 @@ export function pickAnchor(
       return r.width >= MIN_VIDEO_PX && r.height >= MIN_VIDEO_PX;
     });
   if (!idx.length) return -1;
-
-  // Con trỏ đang nằm trên cái nào thì neo vào cái đó. Đo thật trên một feed
-  // vừa có ảnh vừa có video: luật "đang phát trước, rồi lớn nhất" luôn chọn
-  // video ở bài KHÁC, nên bài người dùng đang trỏ vào không có nút nào.
-  if (cursor) {
-    const under = idx.filter((i) => rectHas(videos[i].rect, cursor));
-    // Lồng nhau thì lấy cái trong cùng — nó là thứ người dùng thật sự trỏ vào.
-    if (under.length) {
-      return under.reduce((best, i) => (area(videos[i].rect) < area(videos[best].rect) ? i : best), under[0]);
-    }
-  }
 
   const visible = idx.filter((i) => inViewport(videos[i].rect, viewport));
   const pool = visible.length ? visible : idx;
