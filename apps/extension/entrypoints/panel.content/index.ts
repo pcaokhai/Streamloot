@@ -20,6 +20,7 @@ import { groupFormats, qualityName } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
 import { extFromUrl } from '../../lib/capture';
+import { cleanTitle } from '../../lib/title';
 import { extractPlayerResponse, formatsFromPlayerResponse, playerResponseVideoId, currentVideoId, sameVideo } from '../../lib/youtube';
 import { extractVideos, pickByDuration, listLabel, watchUrl } from '../../lib/facebook';
 import { parseMpd } from '../../lib/dash';
@@ -70,7 +71,9 @@ const ask = async <T,>(msg: unknown): Promise<T> => {
 
 function toPayload(cap: Capture): VideoInfoPayload {
   return {
-    title: document.title || cap.host,
+    // Tiêu đề đã bỏ đuôi tên site: đây là thứ backend dùng làm TÊN FILE, nên
+    // để nguyên là mọi file tải về đều mang tên site.
+    title: cleanTitle(document.title, location.hostname) || cap.host,
     m3u8_url: cap.url,
     page_url: location.href,
     referer: cap.referer ?? location.origin + '/',
@@ -606,7 +609,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
           r = await ask<{ ok: boolean; error?: string }>({
             type: 'startByManifest',
             manifestXml: row.manifestXml,
-            title: document.title,
+            title: cleanTitle(document.title, location.hostname),
             url: location.href,
             formatId: row.formatId || null,
           });
@@ -726,7 +729,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
             url: null,
             directUrl: p.url,
             fileName: downloadName({
-              title: document.title,
+              title: cleanTitle(document.title, location.hostname),
               id: v.id,
               quality: p.quality,
               ext: 'mp4',
@@ -785,24 +788,33 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // tới khi hết giờ — đúng lỗi đã gặp. Hiện ngay một dòng tải thẳng.
       if (cap?.kind === 'progressive') {
         const ext = extFromUrl(cap.url);
+        // Độ phân giải lấy từ chính thẻ <video> đang phát: capture không mang
+        // thông tin đó, nhưng trình duyệt thì biết. Nhờ vậy dòng hiện đúng tên
+        // mức ("Full HD", "HD"…) thay vì một chữ "Gốc" chung chung.
+        const h = anchored?.videoHeight || 0;
+        const name = qualityName(h) || 'Gốc';
         say('Bấm một dòng để tải');
         addGroup('VIDEO', '▭', [{
           formatId: '',
-          label: 'Chất lượng gốc',
+          label: h > 0 ? `${h}p` : 'Chất lượng gốc',
           detail: ext,
           recommended: true,
-          name: 'Gốc',
+          name,
           ext,
           url: null,
           directUrl: cap.url,
-          fileName: downloadName({ title: document.title, id: cap.host, ext }),
+          fileName: downloadName({
+            title: cleanTitle(document.title, location.hostname),
+            id: cap.host,
+            ext,
+          }),
         }]);
         // Đường qua app làm dự phòng: nó gửi kèm Referer đã bắt được, nên chạy
         // được cả khi CDN từ chối lượt tải thẳng của trình duyệt (thiếu Referer).
         addGroup('NẾU TẢI THẲNG BỊ CHẶN', '▲', [{
           formatId: '',
-          label: 'Tải qua app',
-          detail: 'gửi kèm Referer',
+          label: h > 0 ? `${h}p` : 'Chất lượng gốc',
+          detail: ext,
           recommended: false,
           name: 'Qua app',
           ext,
