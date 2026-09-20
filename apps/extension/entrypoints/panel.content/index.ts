@@ -212,6 +212,8 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
      * đúng lỗi "bài ảnh không có nút tải" đo được ngày 20/09.
      */
     let cursor: { x: number; y: number } | null = null;
+    /** Khung bài mà panel đang mở cho. Giữ nút đứng yên trong lúc panel mở. */
+    let panelBox: Element | null = null;
     let moveQueued = false;
     function onMove(ev: MouseEvent): void {
       if (moveQueued) return;
@@ -271,6 +273,22 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
 
     /** Đo lại và đặt nút. Gọi từ observer, không từ bộ đếm. */
     function place(): void {
+      // Panel đang mở thì KHOÁ phần tử neo, chỉ đo lại vị trí của nó.
+      //
+      // Lúc lướt carousel, trang dựng lại DOM liên tục nên observer gọi place()
+      // hàng chục lần; chọn lại mỗi lần là nút nhảy loạn giữa các bài — và tệ
+      // hơn, panel đang hiện ảnh của bài A lại treo trên bài B.
+      if (mounted && panelBox?.isConnected) {
+        const r = panelBox.getBoundingClientRect();
+        if (isUsableRect(r)) {
+          const p = buttonPos(r, BTN_SIZE, BTN_PAD);
+          fab.style.top = `${p.top}px`;
+          fab.style.left = `${p.left}px`;
+          placePanel(p);
+          applyFabVisibility();
+          return;
+        }
+      }
       // Ảnh cũng là ứng viên neo: bài chỉ có ảnh thì trước đây không có nút nào
       // cả, nên người dùng không có đường nào tải. Video xếp trước ảnh để bài
       // vừa có video vừa có ảnh thì nút vẫn về video (ca thường hơn hẳn).
@@ -919,6 +937,22 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         }
       }
 
+      /**
+       * Chụp cho tới khi có ảnh mới, tối đa ~3 giây.
+       *
+       * Chờ cứng một khoảng là sai cách: mạng chậm thì mất ảnh, mạng nhanh thì
+       * phí thời gian. Điều kiện dừng phải là thứ ta thật sự cần — một ảnh mới.
+       */
+      async function waitForNewPhoto(box: Element, shots: PhotoEl[], known: number): Promise<number> {
+        for (let t = 0; t < 20; t += 1) {
+          await new Promise((r) => setTimeout(r, 150));
+          snapPhotos(box, shots);
+          const n = collectPhotos(shots).length;
+          if (n > known) return n;
+        }
+        return collectPhotos(shots).length;
+      }
+
       if (photoMode && anchored instanceof HTMLImageElement) {
         // Khung bài: `<article>` là thẻ ngữ nghĩa cho "một bài", không phải một
         // lớp CSS của riêng site nào.
@@ -936,16 +970,13 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
               const next = nextSlideButton(box);
               if (!next) break;
               next.click();
-              // Chụp hai lần: ảnh mới thường chưa tải xong ở nhịp đầu, và ảnh
-              // chưa tải thì `naturalWidth` bằng 0 nên bị loại mất.
-              await new Promise((r) => setTimeout(r, 450));
-              snapPhotos(box, shots);
-              await new Promise((r) => setTimeout(r, 450));
-              snapPhotos(box, shots);
-              const now = collectPhotos(shots).length;
+              // Chờ theo KẾT QUẢ, không theo đồng hồ. Bản trước ngủ 450ms rồi
+              // chụp: ảnh nào tải chậm hơn thế là mất, và bài 4 ảnh ra 2. Ảnh
+              // chưa tải xong thì `naturalWidth` bằng 0 nên cũng không đếm.
+              const now = await waitForNewPhoto(box, shots, known);
               if (now === known) break;
               known = now;
-              say(`Đang xem bài có mấy ảnh… (${now})`);
+              say(`Đang gom ảnh… (${known})`);
             }
           }
           const photos = collectPhotos(shots);
@@ -1078,6 +1109,10 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // ui.mount() đã chạy ngay từ đầu (để nút hiện ra) — bấm nút chỉ còn việc
       // mở panel ra và vẽ nội dung, không cần mount lại.
       mounted = true;
+      // Neo panel vào cả BÀI, không vào riêng tấm ảnh: lướt carousel là trang
+      // tháo tấm ảnh cũ khỏi DOM, và lúc đó phần tử neo biến mất khiến nút
+      // nhảy sang bài khác giữa chừng.
+      panelBox = anchored?.closest('article') ?? anchored;
       applyFabVisibility();
       // Đặt panel theo vị trí HIỆN TẠI của nút trước khi hiện — nút có thể đã
       // dời chỗ từ lần placePanel gần nhất mà panel lúc đó chưa được mount.
