@@ -15,7 +15,7 @@
 import './style.css';
 import type { Capture, FormatOption, VideoInfoPayload } from '../../lib/types';
 import { pickCapture } from '../../lib/pick';
-import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, HOVER_FRESH_MS, HOVER_TICK_MS } from '../../lib/anchor';
+import { pickAnchor, rectHas, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, HOVER_FRESH_MS, HOVER_TICK_MS } from '../../lib/anchor';
 import { groupFormats, qualityName } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
@@ -308,6 +308,24 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         rect: m.getBoundingClientRect(),
         playing: m instanceof HTMLVideoElement && !m.paused && !m.ended && m.readyState > 2,
       }));
+      // Con trỏ không nằm trên media nào: GIỮ neo cũ, chỉ đo lại vị trí.
+      //
+      // Bản trước lùi về luật "đang phát / lớn nhất", nên vừa đưa chuột ra khỏi
+      // ảnh là nút bay sang bài khác ở tận mép phải. Nhảy sang bài người dùng
+      // không nhìn thì chẳng để làm gì — nút sắp tự ẩn sau 5 giây rồi.
+      const at = cursor;
+      if (at && anchored?.isConnected && !shaped.some((m) => rectHas(m.rect, at))) {
+        const r = anchored.getBoundingClientRect();
+        if (isUsableRect(r)) {
+          const p = buttonPos(r, BTN_SIZE, BTN_PAD);
+          fab.style.top = `${p.top}px`;
+          fab.style.left = `${p.left}px`;
+          placePanel(p);
+          applyFabVisibility();
+          return;
+        }
+      }
+
       const i = pickAnchor(shaped, { width: window.innerWidth, height: window.innerHeight }, cursor);
 
       let pos: { top: number; left: number };
@@ -533,7 +551,11 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // Bài chỉ có ảnh: không có video, không có capture — nhưng vẫn tải được,
       // nên panel phải mở. Trước đây guard bên dưới đóng thẳng, và người dùng
       // không có đường nào để tải ảnh cả.
-      const photoMode = !cap && anchored instanceof HTMLImageElement;
+      //
+      // KHÔNG phụ thuộc `cap`: capture gom theo TAB chứ không theo bài, nên khi
+      // trỏ vào ảnh mà feed có video ở bài khác thì panel hiện nhầm danh sách
+      // video của bài đó — đúng lỗi đo được 20/09.
+      const photoMode = anchored instanceof HTMLImageElement;
       const byUrl = !cap;
       if (byUrl && !photoMode && !hasVideo()) return;
 

@@ -1,4 +1,4 @@
-import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX, PANEL_W, PANEL_GAP, FAB_HIDE_MS, HOVER_FRESH_MS, HOVER_TICK_MS } from '../.tmp-anchor.mjs';
+import { rectHas, pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRect, BTN_SIZE, BTN_PAD, MIN_VIDEO_PX, PANEL_W, PANEL_GAP, FAB_HIDE_MS, HOVER_FRESH_MS, HOVER_TICK_MS } from '../.tmp-anchor.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -111,6 +111,13 @@ t('khong truyen con tro thi khong doi gi',
   () => pickAnchor([box(0, 0, 400, 400), box(0, 0, 800, 800)], SCREEN), 1);
 t('con tro tren cai qua nho thi khong neo vao no',
   () => pickAnchor([box(0, 0, 50, 50), box(0, 0, 400, 400)], SCREEN, { x: 10, y: 10 }), 1);
+
+// --- rectHas ---
+const R = { top: 10, left: 10, width: 100, height: 100 };
+t('diem giua khung', () => rectHas(R, { x: 50, y: 50 }), true);
+t('mep tinh la nam trong', () => rectHas(R, { x: 110, y: 110 }), true);
+t('ngoai khung', () => rectHas(R, { x: 200, y: 50 }), false);
+t('ngoai theo truc doc', () => rectHas(R, { x: 50, y: 9 }), false);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

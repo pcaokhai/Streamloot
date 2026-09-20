@@ -35,6 +35,11 @@ export const MIN_VIDEO_PX = 120;
 
 const area = (r: Rect) => r.width * r.height;
 
+/** Điểm có nằm trong khung không. Mép tính là nằm trong. */
+export function rectHas(r: Rect, p: { x: number; y: number }): boolean {
+  return p.x >= r.left && p.x <= r.left + r.width && p.y >= r.top && p.y <= r.top + r.height;
+}
+
 function inViewport(r: Rect, view: { width: number; height: number }): boolean {
   return r.top < view.height && r.top + r.height > 0 && r.left < view.width && r.left + r.width > 0;
 }
@@ -66,11 +71,7 @@ export function pickAnchor(
   // vừa có ảnh vừa có video: luật "đang phát trước, rồi lớn nhất" luôn chọn
   // video ở bài KHÁC, nên bài người dùng đang trỏ vào không có nút nào.
   if (cursor) {
-    const under = idx.filter((i) => {
-      const r = videos[i].rect;
-      return cursor.x >= r.left && cursor.x <= r.left + r.width
-        && cursor.y >= r.top && cursor.y <= r.top + r.height;
-    });
+    const under = idx.filter((i) => rectHas(videos[i].rect, cursor));
     // Lồng nhau thì lấy cái trong cùng — nó là thứ người dùng thật sự trỏ vào.
     if (under.length) {
       return under.reduce((best, i) => (area(videos[i].rect) < area(videos[best].rect) ? i : best), under[0]);
