@@ -14,11 +14,19 @@ function depth(u: URL): number {
   return u.pathname.split('/').filter(Boolean).length;
 }
 
+/** Đường dẫn riêng của một video gần như luôn là `/<loại>/<mã>`: hai đoạn. */
+const VIDEO_DEPTH = 2;
+
 /**
- * Chọn link sâu nhất, cùng origin, sâu hơn trang hiện tại.
+ * Chọn link NGẮN NHẤT có đủ độ sâu của một trang video, cùng origin.
  *
- * Trả `null` khi trang hiện tại ĐÃ là trang riêng của video — lúc đó
- * `location.href` mới là thứ đúng, đổi đi là tải nhầm.
+ * Ngắn nhất chứ không phải sâu nhất: link sâu nhất trong một bài viết thường
+ * là link địa điểm hay hashtag (`/explore/locations/<id>/<tên>`), gửi nó đi
+ * là backend báo "Unsupported URL". Link một đoạn (`/<người dùng>/`) thì
+ * ngược lại, nông quá — đó là trang cá nhân, không phải video.
+ *
+ * Trả `null` khi trang hiện tại ĐÃ đủ sâu để là trang riêng của video — lúc
+ * đó `location.href` mới là thứ đúng, đổi đi là tải nhầm.
  */
 export function deeperPermalink(pageUrl: string, hrefs: readonly string[]): string | null {
   let here: URL;
@@ -27,6 +35,8 @@ export function deeperPermalink(pageUrl: string, hrefs: readonly string[]): stri
   } catch {
     return null;
   }
+
+  if (depth(here) >= VIDEO_DEPTH) return null;
 
   let best: URL | null = null;
   for (const href of hrefs) {
@@ -37,8 +47,8 @@ export function deeperPermalink(pageUrl: string, hrefs: readonly string[]): stri
       continue;
     }
     if (u.origin !== here.origin) continue;
-    if (depth(u) <= depth(here)) continue;
-    if (!best || depth(u) > depth(best)) best = u;
+    if (depth(u) < VIDEO_DEPTH) continue;
+    if (!best || depth(u) < depth(best)) best = u;
   }
   // Bỏ query/hash: chúng thường là tham số theo dõi, làm hai lượt tải cùng một
   // video trông như hai video khác nhau.
