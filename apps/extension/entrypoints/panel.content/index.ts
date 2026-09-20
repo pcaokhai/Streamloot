@@ -226,11 +226,6 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         if (anchored && (!anchored.isConnected || !isUsableRect(anchored.getBoundingClientRect()))) {
           place();
         }
-        // Con trỏ đã rời khỏi cái đang neo: neo lại theo vị trí mới. Đây là
-        // cách duy nhất nút đi theo người dùng khi họ lướt qua từng bài.
-        if (!mounted && (!anchored || !isOverRect({ x, y }, [anchored.getBoundingClientRect()], 0))) {
-          place();
-        }
         const rects = [];
         if (anchored) {
           const r = anchored.getBoundingClientRect();
@@ -239,8 +234,19 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         if (!fab.classList.contains('sl-hidden')) rects.push(fab.getBoundingClientRect());
         // Vùng đệm bằng cả nút + lề: nút nằm NGOÀI mép trên video, nên đường đi
         // từ video lên tới nút không được tính là "đã rời video".
-        if (isOverRect({ x, y }, rects, BTN_SIZE + BTN_PAD)) markOver();
-        else applyFabVisibility();
+        if (isOverRect({ x, y }, rects, BTN_SIZE + BTN_PAD)) {
+          markOver();
+          return;
+        }
+        applyFabVisibility();
+        // Ra hẳn khỏi vùng giữ nút: neo lại theo vị trí mới, nhờ vậy nút đi
+        // theo người dùng khi họ lướt từng bài.
+        //
+        // Phải nằm SAU phép kiểm trên, không phải trước. Bản đầu neo lại ngay
+        // khi con trỏ rời hình — mà chính cái nút lại nằm NGOÀI hình, nên rê
+        // tay tới nút là neo lại sang bài khác và nút chạy mất trước khi bấm
+        // được.
+        if (!mounted) place();
       });
     }
     document.addEventListener('mousemove', onMove, { passive: true, capture: true });
@@ -272,9 +278,13 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // Trên feed vừa có ảnh vừa có video, cái nào con trỏ đang trỏ vào thì neo
       // vào cái đó — xem pickAnchor. Lọc trước theo `naturalWidth` (thuộc tính
       // rẻ, không gây layout) để khỏi đo hàng trăm ảnh vặt mỗi nhịp cuộn.
-      const imgs = ([...document.querySelectorAll('img')] as HTMLImageElement[]).filter(
-        (im) => im.naturalWidth >= MIN_PHOTO_PX && im.naturalHeight >= MIN_PHOTO_PX,
-      );
+      // Lọc theo cỡ HIỆN TRÊN MÀN HÌNH, không theo cỡ gốc của file: avatar của
+      // Instagram là ảnh 320x320 hiển thị ở 32px. Lọc theo cỡ gốc thì nút neo
+      // vào avatar và nằm chệch hẳn sang trái bài — đúng lỗi đo được 20/09.
+      const imgs = ([...document.querySelectorAll('img')] as HTMLImageElement[]).filter((im) => {
+        const r = im.getBoundingClientRect();
+        return r.width >= MIN_PHOTO_PX && r.height >= MIN_PHOTO_PX;
+      });
       const media: (HTMLVideoElement | HTMLImageElement)[] = [...vids, ...imgs];
       const shaped = media.map((m) => ({
         rect: m.getBoundingClientRect(),
@@ -897,12 +907,14 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       /** Ảnh đang hiện trong khung bài, đo ngay tại thời điểm gọi. */
       function snapPhotos(box: Element, into: PhotoEl[]): void {
         for (const im of box.querySelectorAll('img')) {
-          const r = im.getBoundingClientRect();
+          // Cỡ GỐC, không phải cỡ trên màn hình: lúc lướt, slide đang trượt vào
+          // có bề rộng hiển thị bằng 0 hoặc đang co giãn. Đo theo đó thì ảnh
+          // thật bị loại — đo thật: bài 4 ảnh chỉ gom được 2.
           into.push({
             src: im.currentSrc || im.src,
             srcset: im.getAttribute('srcset'),
-            width: r.width,
-            height: r.height,
+            width: im.naturalWidth,
+            height: im.naturalHeight,
           });
         }
       }
@@ -917,13 +929,23 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
           if (box) {
             snapPhotos(box, shots);
             // Carousel chỉ render slide đang xem, nên phải lướt qua mới thấy
-            // hết. Chặn trên 20 lượt: gặp carousel vòng tròn thì không lướt mãi.
+            // hết. Dừng khi một lượt không ra ảnh mới (carousel vòng tròn thì
+            // nút "next" không bao giờ biến mất), chặn trên 20 lượt.
+            let known = collectPhotos(shots).length;
             for (let i = 0; i < 20; i += 1) {
               const next = nextSlideButton(box);
               if (!next) break;
               next.click();
+              // Chụp hai lần: ảnh mới thường chưa tải xong ở nhịp đầu, và ảnh
+              // chưa tải thì `naturalWidth` bằng 0 nên bị loại mất.
               await new Promise((r) => setTimeout(r, 450));
               snapPhotos(box, shots);
+              await new Promise((r) => setTimeout(r, 450));
+              snapPhotos(box, shots);
+              const now = collectPhotos(shots).length;
+              if (now === known) break;
+              known = now;
+              say(`Đang xem bài có mấy ảnh… (${now})`);
             }
           }
           const photos = collectPhotos(shots);
