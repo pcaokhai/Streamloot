@@ -104,7 +104,7 @@ export default defineContentScript({
       const wake = () => {
         document.removeEventListener('loadedmetadata', wake, true);
         document.removeEventListener('play', wake, true);
-        void start(ctx);
+          void startSafely(ctx);
       };
       document.addEventListener('loadedmetadata', wake, true);
       document.addEventListener('play', wake, true);
@@ -114,9 +114,28 @@ export default defineContentScript({
       });
       return;
     }
-    await start(ctx);
+    await startSafely(ctx);
   },
 });
+
+/**
+ * Chạy `start`, nuốt riêng lỗi "script bị mồ côi".
+ *
+ * Nạp lại extension trong khi các tab còn mở là chuyện xảy ra mỗi lần phát
+ * triển, và bản script cũ trong những tab đó chết ngay ở bước dựng shadow root
+ * (`createShadowRootUi` phải nạp CSS qua `runtime.getURL`). Không bắt thì lỗi
+ * nổi lên thành chữ đỏ trong chrome://extensions, lẫn vào lỗi thật.
+ *
+ * Chỉ nuốt ĐÚNG lỗi đó. Mọi lỗi khác vẫn ném — chúng là lỗi thật cần thấy.
+ */
+async function startSafely(ctx: Parameters<typeof start>[0]): Promise<void> {
+  try {
+    await start(ctx);
+  } catch (err) {
+    if (!isOrphaned(err)) throw err;
+    console.warn('[Streamloot]', RELOAD_PAGE_MSG);
+  }
+}
 
 async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     let captures: Capture[] = [];
