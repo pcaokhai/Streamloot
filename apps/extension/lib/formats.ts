@@ -46,6 +46,23 @@ export interface FormatRow {
 }
 
 /**
+ * Mức chất lượng của một format: CẠNH NGẮN, không phải chiều cao.
+ *
+ * Video dọc (reel, short) là 1080x1920. Lấy chiều cao thì nó thành "2K" trong
+ * khi người dùng và mọi công cụ khác gọi nó là 1080p. Cạnh ngắn đúng cho cả
+ * video ngang lẫn dọc.
+ */
+export function qualityHeight(f: { height?: number | null; width?: number | null }): number | null {
+  const h = typeof f.height === 'number' && f.height > 0 ? f.height : null;
+  const w = typeof f.width === 'number' && f.width > 0 ? f.width : null;
+  if (h && w) return Math.min(h, w);
+  return h;
+}
+
+/** Tên cho format không khai độ phân giải — không bịa mức, cũng không bỏ trống. */
+const UNKNOWN_NAME = 'Tiêu chuẩn';
+
+/**
  * Tên cấp chất lượng theo chiều cao, cùng thang với IDM/Cốc Cốc để người dùng
  * quen tay không phải học lại. Không rõ chiều cao thì trả rỗng — panel sẽ chỉ
  * hiện độ phân giải, không bịa tên.
@@ -80,9 +97,9 @@ export function humanSize(bytes: number | null): string {
 }
 
 function labelFor(f: FormatOption): string {
-  if (typeof f.height === 'number' && f.height > 0) return `${f.height}p`;
-  if (f.resolution) return f.resolution;
-  return 'Chất lượng không rõ';
+  const h = qualityHeight(f);
+  if (h) return `${h}p`;
+  return f.resolution ?? '';
 }
 
 function rowFor(f: FormatOption): FormatRow {
@@ -92,7 +109,7 @@ function rowFor(f: FormatOption): FormatRow {
     label: labelFor(f),
     detail: size ? `${f.ext} · ${size}` : f.ext,
     recommended: f.recommended,
-    name: f.vcodec === 'none' ? 'Audio' : qualityName(f.height),
+    name: f.vcodec === 'none' ? 'Audio' : qualityName(qualityHeight(f)) || UNKNOWN_NAME,
     ext: f.ext,
     url: f.url ?? null,
   };
@@ -160,6 +177,6 @@ export function groupFormats(formats: FormatOption[]): { video: FormatRow[]; aud
     if (f.vcodec === 'none') audio.push(f);
     else video.push(f);
   }
-  video.sort((a, b) => (b.height ?? 0) - (a.height ?? 0));
+  video.sort((a, b) => (qualityHeight(b) ?? 0) - (qualityHeight(a) ?? 0));
   return { video: dedupeRows(video.map(rowFor)), audio: dedupeRows(audio.map(rowFor)) };
 }

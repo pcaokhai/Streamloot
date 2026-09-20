@@ -28,6 +28,8 @@ export interface FormatOption {
   ext: string;
   resolution: string;
   height: number | null;
+  /** Chiều rộng, có thì mới biết video dọc hay ngang. */
+  width?: number | null;
   /** Byte, hoặc `null` khi yt-dlp không biết trước (HLS thường không biết). */
   filesize: number | null;
   /** `'none'` nghĩa là luồng này KHÔNG có hình — đó là cách tách âm thanh. */

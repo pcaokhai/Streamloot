@@ -1,4 +1,4 @@
-import { groupFormats, humanSize, qualityName } from '../.tmp-formats.mjs';
+import { qualityHeight, groupFormats, humanSize, qualityName } from '../.tmp-formats.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -38,8 +38,10 @@ t('nhãn video là chiều cao kèm p',
   () => groupFormats([f({ format_id: 'v', height: 720 })]).video[0].label, '720p');
 t('không biết chiều cao thì dùng resolution',
   () => groupFormats([f({ format_id: 'v', resolution: '1920x1080' })]).video[0].label, '1920x1080');
-t('không có gì cả thì vẫn có nhãn đọc được',
-  () => groupFormats([f({ format_id: 'v', resolution: '' })]).video[0].label, 'Chất lượng không rõ');
+t('không có gì cả thì cột độ phân giải để trống — không bịa',
+  () => groupFormats([f({ format_id: 'v', resolution: '' })]).video[0].label, '');
+t('không có gì cả thì cột tên vẫn đọc được',
+  () => groupFormats([f({ format_id: 'v', resolution: '' })]).video[0].name, 'Tiêu chuẩn');
 
 // --- detail: đuôi file + dung lượng ---
 t('detail ghép đuôi và dung lượng',
@@ -100,6 +102,18 @@ t('dấu khuyên chọn không bị mất khi gộp',
   () => groupFormats([vf(1080, 'mp4', 999999), vf(1080, 'mp4', 100, true)]).video[0].recommended, true);
 t('không biết dung lượng thì giữ bản gặp trước',
   () => groupFormats([vf(1080, 'mp4', null), vf(1080, 'mp4', null)]).video.length, 1);
+
+// --- video dọc: 1080x1920 là 1080p, không phải 2K ---
+t('video doc lay canh ngan - reel 1080x1920 la 1080p chu khong phai 2K',
+  () => qualityHeight({ width: 1080, height: 1920 }), 1080);
+t('video ngang van lay chieu cao',
+  () => qualityHeight({ width: 1920, height: 1080 }), 1080);
+t('khong co chieu rong thi dung chieu cao',
+  () => qualityHeight({ height: 720 }), 720);
+t('khong biet gi thi null - de panel khoi biạ muc',
+  () => qualityHeight({}), null);
+t('so 0 khong duoc coi la do phan giai that',
+  () => qualityHeight({ width: 0, height: 1080 }), 1080);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

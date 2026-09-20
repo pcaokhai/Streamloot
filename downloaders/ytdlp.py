@@ -78,6 +78,7 @@ class YtDlpDownloader(BaseDownloader):
                 "ext": f.get("ext"),
                 "resolution": f.get("resolution") or (f"{f.get('height')}p" if f.get("height") else None),
                 "height": f.get("height"),
+                "width": f.get("width"),
                 "filesize": f.get("filesize") or f.get("filesize_approx"),
                 "vcodec": f.get("vcodec"),
                 "acodec": f.get("acodec"),
