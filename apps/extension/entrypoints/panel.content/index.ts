@@ -27,6 +27,7 @@ import { parseMpd } from '../../lib/dash';
 import type { FbVideo } from '../../lib/facebook';
 import { downloadName } from '../../lib/filename';
 import { deeperPermalink } from '../../lib/permalink';
+import { collectPhotos, photoExt, photoIndex, MIN_PHOTO_PX, type PhotoEl } from '../../lib/gallery';
 
 /**
  * Panel KHÔNG gọi HTTP trực tiếp.
@@ -144,11 +145,12 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
     const fab = document.createElement('div');
     fab.className = 'sl-fab';
     fab.textContent = '⤓';
-    fab.title = 'Tải video này bằng Streamloot';
+    fab.title = 'Tải video/ảnh này bằng Streamloot';
     fab.style.width = `${BTN_SIZE}px`;
     fab.style.height = `${BTN_SIZE}px`;
 
-    let anchored: HTMLVideoElement | null = null;
+    /** Video hoặc ảnh đang neo nút. Ảnh: bài nhiều ảnh cũng tải được (§ẢNH). */
+    let anchored: HTMLVideoElement | HTMLImageElement | null = null;
 
     // Nút chỉ hiện khi rê chuột vào video, nán lại FAB_HIDE_MS rồi ẩn — như
     // thanh nút của Cốc Cốc. Quyết định ẩn/hiện nằm ở shouldHideFab (có test);
@@ -250,10 +252,22 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
 
     /** Đo lại và đặt nút. Gọi từ observer, không từ bộ đếm. */
     function place(): void {
+      // Ảnh cũng là ứng viên neo: bài chỉ có ảnh thì trước đây không có nút nào
+      // cả, nên người dùng không có đường nào tải. Video xếp trước ảnh để bài
+      // vừa có video vừa có ảnh thì nút vẫn về video (ca thường hơn hẳn).
       const vids = [...document.querySelectorAll('video')] as HTMLVideoElement[];
-      const shaped = vids.map((v) => ({
-        rect: v.getBoundingClientRect(),
-        playing: !v.paused && !v.ended && v.readyState > 2,
+      // CHỈ xét ảnh khi không có video nào: vừa để video luôn thắng, vừa để
+      // khỏi quét toàn bộ `<img>` của trang trên mỗi lần cuộn (feed có hàng
+      // trăm ảnh — quét mỗi nhịp là thấy giật).
+      const imgs = vids.length
+        ? []
+        : ([...document.querySelectorAll('img')] as HTMLImageElement[]).filter(
+            (im) => im.naturalWidth >= MIN_PHOTO_PX && im.naturalHeight >= MIN_PHOTO_PX,
+          );
+      const media: (HTMLVideoElement | HTMLImageElement)[] = [...vids, ...imgs];
+      const shaped = media.map((m) => ({
+        rect: m.getBoundingClientRect(),
+        playing: m instanceof HTMLVideoElement && !m.paused && !m.ended && m.readyState > 2,
       }));
       const i = pickAnchor(shaped, { width: window.innerWidth, height: window.innerHeight });
 
@@ -264,7 +278,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         anchored = null;
         pos = { top: BTN_PAD, left: window.innerWidth - BTN_SIZE - BTN_PAD };
       } else {
-        anchored = vids[i];
+        anchored = media[i];
         pos = buttonPos(shaped[i].rect, BTN_SIZE, BTN_PAD);
       }
       fab.style.top = `${pos.top}px`;
@@ -477,8 +491,12 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         return deeperPermalink(location.href, hrefs);
       }
 
+      // Bài chỉ có ảnh: không có video, không có capture — nhưng vẫn tải được,
+      // nên panel phải mở. Trước đây guard bên dưới đóng thẳng, và người dùng
+      // không có đường nào để tải ảnh cả.
+      const photoMode = !cap && anchored instanceof HTMLImageElement;
       const byUrl = !cap;
-      if (byUrl && !hasVideo()) return;
+      if (byUrl && !photoMode && !hasVideo()) return;
 
       // Trên feed (Instagram, Facebook…), `location.href` là trang chủ: gửi nó
       // cho yt-dlp thì nhận "Unsupported URL". Link riêng của video nằm ngay
@@ -549,7 +567,9 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         el.append(c1, c2, c3);
         el.onclick = () => {
           if (!canSubmit(pending)) return; // đang bay — bấm thêm không làm gì
-          void (row.directUrl
+          void (row.photos
+            ? savePhotos(row)
+            : row.directUrl
             ? saveDirect(row)
             : row.manifestXml
             ? startByManifest(row)
@@ -655,6 +675,52 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
        * Dùng cho URL là file hoàn chỉnh đã có sẵn tiếng. Chạy được cả khi app
        * Streamloot chưa mở — đó là cả điểm của đường này.
        */
+      /**
+       * Tải cả bộ ảnh, mỗi ảnh một lượt `chrome.downloads`.
+       *
+       * Tải tuần tự chứ không song song: `downloads.download` bắn song song
+       * hàng chục lượt thì Chrome dựng hộp thoại hỏi quyền, và người dùng thấy
+       * như app bị treo.
+       *
+       * Một ảnh hỏng KHÔNG dừng cả bộ — bỏ dở ở ảnh thứ ba là tệ hơn hẳn việc
+       * báo "tải được 3/4".
+       */
+      async function savePhotos(row: FormatRow): Promise<void> {
+        const photos = row.photos ?? [];
+        setPending(true);
+        let done = 0;
+        for (const [i, url] of photos.entries()) {
+          say(`Đang tải ảnh ${i + 1}/${photos.length}…`);
+          try {
+            const r = await ask<{ ok: boolean; error?: string }>({
+              type: 'saveDirect',
+              url,
+              filename: downloadName({
+                title: photoIndex(i, photos.length),
+                id: String(i + 1),
+                folder: row.photoFolder,
+                ext: photoExt(url),
+              }),
+            });
+            if (r.ok) done += 1;
+          } catch {
+            // nuốt có chủ đích: đếm ở `done`, báo tổng kết bên dưới
+          }
+        }
+        setPending(false);
+        if (!done) {
+          say('Không tải được ảnh nào', true);
+          return;
+        }
+        if (done < photos.length) {
+          say(`Tải được ${done}/${photos.length} ảnh`, true);
+          return;
+        }
+        mounted = false;
+        root.style.display = 'none';
+        applyFabVisibility();
+      }
+
       async function saveDirect(row: FormatRow): Promise<void> {
         setPending(true);
         say('Đang giao cho trình duyệt tải…');
@@ -733,7 +799,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         //
         // Không chắc thì hiện cả danh sách, KHÔNG đoán: đưa nhầm video là thứ
         // người dùng không có cách nào tự phát hiện trước khi tải xong.
-        const dur = anchored?.duration ?? NaN;
+        const dur = anchored instanceof HTMLVideoElement ? anchored.duration : NaN;
         const hit = pickByDuration(all, dur);
         const embedded = hit >= 0 ? [all[hit]] : all;
         say(listLabel({ matched: hit >= 0, total: all.length }));
@@ -802,6 +868,75 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         return;
       }
 
+      /**
+       * Nút "sang ảnh kế" của carousel.
+       *
+       * Tìm theo aria-label vì đó là thứ DUY NHẤT ổn định: tên class của trang
+       * là chuỗi băm, đổi mỗi lần họ build lại. Không thấy thì coi như hết ảnh
+       * — thà tải phần đã có còn hơn báo lỗi trắng.
+       */
+      function nextSlideButton(box: Element): HTMLElement | null {
+        for (const b of box.querySelectorAll('button,[role="button"]')) {
+          const label = b.getAttribute('aria-label') ?? '';
+          if (/next|tiếp|sau/i.test(label) && b instanceof HTMLElement) return b;
+        }
+        return null;
+      }
+
+      /** Ảnh đang hiện trong khung bài, đo ngay tại thời điểm gọi. */
+      function snapPhotos(box: Element, into: PhotoEl[]): void {
+        for (const im of box.querySelectorAll('img')) {
+          const r = im.getBoundingClientRect();
+          into.push({
+            src: im.currentSrc || im.src,
+            srcset: im.getAttribute('srcset'),
+            width: r.width,
+            height: r.height,
+          });
+        }
+      }
+
+      if (photoMode && anchored instanceof HTMLImageElement) {
+        // Khung bài: `<article>` là thẻ ngữ nghĩa cho "một bài", không phải một
+        // lớp CSS của riêng site nào.
+        const box = anchored.closest('article') ?? anchored.parentElement;
+        say('Đang xem bài có mấy ảnh…');
+        void (async () => {
+          const shots: PhotoEl[] = [];
+          if (box) {
+            snapPhotos(box, shots);
+            // Carousel chỉ render slide đang xem, nên phải lướt qua mới thấy
+            // hết. Chặn trên 20 lượt: gặp carousel vòng tròn thì không lướt mãi.
+            for (let i = 0; i < 20; i += 1) {
+              const next = nextSlideButton(box);
+              if (!next) break;
+              next.click();
+              await new Promise((r) => setTimeout(r, 450));
+              snapPhotos(box, shots);
+            }
+          }
+          const photos = collectPhotos(shots);
+          if (!photos.length) {
+            say('Không thấy ảnh nào tải được', true);
+            return;
+          }
+          const base = cleanTitle(document.title, location.hostname);
+          addGroup('ẢNH', '▣', [{
+            formatId: '',
+            label: `${photos.length} ảnh`,
+            detail: photoExt(photos[0]),
+            recommended: true,
+            name: 'Tải tất cả',
+            ext: photoExt(photos[0]),
+            url: null,
+            photos,
+            photoFolder: `${brandOf(location.hostname)}/${base}`,
+          }]);
+          say('Bấm một dòng để tải');
+        })();
+        return;
+      }
+
       // Capture là FILE HOÀN CHỈNH (MP4/WebM): không có danh sách nào để lấy.
       //
       // Hỏi backend ở đây là treo panel ở "Đang lấy danh sách chất lượng…" cho
@@ -811,7 +946,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         // Độ phân giải lấy từ chính thẻ <video> đang phát: capture không mang
         // thông tin đó, nhưng trình duyệt thì biết. Nhờ vậy dòng hiện đúng tên
         // mức ("Full HD", "HD"…) thay vì một chữ "Gốc" chung chung.
-        const h = anchored?.videoHeight || 0;
+        const h = anchored instanceof HTMLVideoElement ? anchored.videoHeight : 0;
         // Không đọc được chiều cao thì gọi là "Tiêu chuẩn" và để trống cột độ
         // phân giải — bịa một con số ở đó còn tệ hơn là không nói gì.
         const name = qualityName(h) || 'Tiêu chuẩn';

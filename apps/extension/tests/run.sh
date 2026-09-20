@@ -19,6 +19,9 @@ npx esbuild lib/title.ts --bundle --format=esm --outfile=.tmp-title.mjs --log-le
 node tests/title.test.mjs
 npx esbuild lib/capture.ts --bundle --format=esm --outfile=.tmp-capture.mjs --log-level=error
 node tests/capture.test.mjs
+npx esbuild lib/gallery.ts --bundle --format=esm --outfile=.tmp-gallery.mjs --log-level=error
+node tests/gallery.test.mjs
+
 npx esbuild lib/permalink.ts --bundle --format=esm --outfile=.tmp-permalink.mjs --log-level=error
 node tests/permalink.test.mjs
 
@@ -32,4 +35,4 @@ npx esbuild lib/youtube.ts --bundle --format=esm --outfile=.tmp-youtube.mjs --lo
 node tests/youtube.test.mjs
 npx esbuild lib/submitGuard.ts --bundle --format=esm --outfile=.tmp-submitGuard.mjs --log-level=error
 node tests/submitGuard.test.mjs
-rm -f .tmp-permalink.mjs .tmp-title.mjs .tmp-capture.mjs .tmp-filename.mjs .tmp-facebook.mjs .tmp-dash.mjs .tmp-youtube.mjs .tmp-pick.mjs .tmp-tasks.mjs .tmp-formats.mjs .tmp-anchor.mjs .tmp-submitGuard.mjs .tmp-m3u8.mjs
+rm -f .tmp-gallery.mjs .tmp-permalink.mjs .tmp-title.mjs .tmp-capture.mjs .tmp-filename.mjs .tmp-facebook.mjs .tmp-dash.mjs .tmp-youtube.mjs .tmp-pick.mjs .tmp-tasks.mjs .tmp-formats.mjs .tmp-anchor.mjs .tmp-submitGuard.mjs .tmp-m3u8.mjs

@@ -43,6 +43,15 @@ export interface FormatRow {
    * trong trình duyệt thì phải nhúng ffmpeg-wasm — cái giá ADR 0007 D3 đã từ chối.
    */
   manifestXml?: string;
+  /**
+   * Cả bộ ảnh của một bài nhiều ảnh. Có trường này thì dòng tải TẤT CẢ.
+   *
+   * yt-dlp không giúp được: extractor bỏ qua node không phải video. Nhưng ảnh
+   * là file hoàn chỉnh nên trình duyệt tải thẳng, không cần app chạy.
+   */
+  photos?: string[];
+  /** Thư mục cho bộ ảnh: `<site>/<tên bài>`, để 4 ảnh không lẫn vào nhau. */
+  photoFolder?: string;
 }
 
 /**

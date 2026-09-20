@@ -36,10 +36,14 @@ t('khong co folder thi giu nguyen ten tran',
   () => downloadName({ title: 'a', id: '1' }), 'a.mp4');
 t('folder rong khong tao dau gach thua',
   () => downloadName({ title: 'a', id: '1', folder: '' }), 'a.mp4');
-t('folder co ky tu cam bi lam sach - neu khong downloads.download tu choi ca luot tai',
-  () => downloadName({ title: 'a', id: '1', folder: '../ke/xau' }), '.._ke_xau/a.mp4');
+t('doan `..` bi bo han - downloads.download tu choi ca luot tai neu thay no',
+  () => downloadName({ title: 'a', id: '1', folder: '../ke/xau' }), 'ke/xau/a.mp4');
 t('dau gach duy nhat la dau ngan thu muc, ten file khong tu tao thu muc con',
   () => downloadName({ title: 'a/b', id: '1', folder: 'vidu' }), 'vidu/a_b.mp4');
+t('folder nhieu tang cho bai nhieu anh',
+  () => downloadName({ title: '01', id: '1', folder: 'vidu/Ten bai', ext: 'jpg' }), 'vidu/Ten bai/01.jpg');
+t('doan folder rong bi bo, khong sinh // trong duong dan',
+  () => downloadName({ title: 'a', id: '1', folder: 'vidu//' }), 'vidu/a.mp4');
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
