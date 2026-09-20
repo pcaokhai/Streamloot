@@ -16,7 +16,7 @@ import { BackendError } from '../lib/api';
 import { applyIconState, flashCompleted } from '../lib/icon';
 import { cacheTasks } from '../lib/cache';
 import { nextPollMs, pickRingTask, shouldCacheFormatFailure } from '../lib/tasks';
-import { contentLengthOf, contentTypeOf, mediaKind, worthCapturing } from '../lib/capture';
+import { contentLengthOf, contentTypeOf, isPartial, mediaKind, worthCapturing } from '../lib/capture';
 import { canSetHeaders, dirFilter, withHeaders } from '../lib/dnr';
 import { hasSeparateAudio, isMaster, isSubtitlePlaylist, parseMaster, siblingMasterUrl, variantsToFormats } from '../lib/m3u8';
 import type { Capture, FormatOption, TaskRecord, VideoInfoPayload } from '../lib/types';
@@ -160,7 +160,11 @@ export default defineBackground(() => {
       const ct = contentTypeOf(d.responseHeaders);
       const kind = mediaKind(d.url, ct);
       // Ngưỡng kích thước loại quảng cáo: đo được 1.7–2.4MB trên một site thật.
-      if (!worthCapturing({ kind, contentLength: contentLengthOf(d.responseHeaders) })) {
+      if (!worthCapturing({
+        kind,
+        contentLength: contentLengthOf(d.responseHeaders),
+        partial: isPartial(d.statusCode, d.responseHeaders),
+      })) {
         return undefined;
       }
       void addCapture(d.tabId, {

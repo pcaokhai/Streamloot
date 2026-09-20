@@ -37,6 +37,23 @@ const SEGMENT_URL = /\.(ts|m4s)(\?|$)/i;
  */
 export const MIN_PROGRESSIVE_BYTES = 5 * 1024 * 1024;
 
+/**
+ * Response này chỉ là MỘT MẢNH của file, không phải cả file.
+ *
+ * Trình phát video kéo file theo từng khúc (range request). Bắt lấy một khúc
+ * rồi đưa cho người dùng tải thì ra một file mở không lên — đo thật trên một
+ * reel: 9.1 MB tải về, trình phát báo "Cannot open file or stream".
+ *
+ * Nhận ra qua chính giao thức (206 / `Content-Range`), không qua tên site.
+ */
+export function isPartial(
+  statusCode?: number | null,
+  headers?: { name: string; value?: string }[] | null,
+): boolean {
+  if (statusCode === 206) return true;
+  return !!headers?.some((h) => h.name.toLowerCase() === 'content-range');
+}
+
 export type MediaKind = 'manifest' | 'progressive' | null;
 
 /** Loại media của một request, hoặc `null` nếu không phải media tải được. */
@@ -54,10 +71,17 @@ export function mediaKind(url: string, contentType?: string | null): MediaKind {
  *
  * Manifest thì bắt ngay — nó chỉ là một file text nhỏ, và chính nó mới nói cho
  * ta biết video dài bao nhiêu. Progressive thì phải đủ lớn (xem ngưỡng).
+ *
+ * Mảnh thì bỏ hẳn, dù lớn cỡ nào: nó không mở lên được.
  * Không biết kích thước thì BẮT: máy chủ có thể không khai `Content-Length`
  * khi dùng chunked, mà bỏ qua video thật vì thiếu một header là tệ hơn.
  */
-export function worthCapturing(o: { kind: MediaKind; contentLength?: number | null }): boolean {
+export function worthCapturing(o: {
+  kind: MediaKind;
+  contentLength?: number | null;
+  partial?: boolean;
+}): boolean {
+  if (o.partial) return false;
   if (o.kind === 'manifest') return true;
   if (o.kind !== 'progressive') return false;
   const n = o.contentLength;

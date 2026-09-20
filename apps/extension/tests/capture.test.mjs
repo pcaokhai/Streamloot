@@ -1,4 +1,4 @@
-import { mediaKind, worthCapturing, contentLengthOf, contentTypeOf, extFromUrl, MIN_PROGRESSIVE_BYTES } from '../.tmp-capture.mjs';
+import { isPartial, mediaKind, worthCapturing, contentLengthOf, contentTypeOf, extFromUrl, MIN_PROGRESSIVE_BYTES } from '../.tmp-capture.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -73,6 +73,21 @@ t('m3u8 giữ nguyên', () => extFromUrl('https://cdn.example.test/master.m3u8')
 t('đuôi lạ thì lùi về mp4', () => extFromUrl('https://cdn.example.test/v.xyzzy'), 'mp4');
 t('URL rác không làm ném', () => extFromUrl('khong-phai-url'), 'mp4');
 t('chuỗi rỗng', () => extFromUrl(''), 'mp4');
+
+// --- mảnh range: tải về là file mở không lên ---
+t('206 la mot manh', () => isPartial(206, []), true);
+t('200 khong phai manh', () => isPartial(200, []), false);
+t('co Content-Range la manh du ma trang thai 200',
+  () => isPartial(200, [{ name: 'Content-Range', value: 'bytes 0-99/500' }]), true);
+t('ten header khong phan biet hoa thuong',
+  () => isPartial(200, [{ name: 'content-range', value: 'bytes 0-9/50' }]), true);
+t('khong co gi thi khong phai manh', () => isPartial(undefined, null), false);
+t('manh thi KHONG bat, du that lon',
+  () => worthCapturing({ kind: 'progressive', contentLength: 90 * 1024 * 1024, partial: true }), false);
+t('manifest cung khong bat neu la manh',
+  () => worthCapturing({ kind: 'manifest', partial: true }), false);
+t('khong phai manh thi van bat nhu cu',
+  () => worthCapturing({ kind: 'progressive', contentLength: 90 * 1024 * 1024 }), true);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
