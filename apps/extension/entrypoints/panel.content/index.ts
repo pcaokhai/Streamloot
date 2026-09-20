@@ -205,6 +205,13 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
      * Gộp theo rAF: mousemove bắn hàng trăm lần mỗi giây, còn
      * getBoundingClientRect thì ép trình duyệt tính lại layout.
      */
+    /**
+     * Vị trí con trỏ lần cuối, để `place()` biết neo vào cái nào.
+     *
+     * Không có nó thì trên feed nút luôn nhảy về video đang phát ở bài khác —
+     * đúng lỗi "bài ảnh không có nút tải" đo được ngày 20/09.
+     */
+    let cursor: { x: number; y: number } | null = null;
     let moveQueued = false;
     function onMove(ev: MouseEvent): void {
       if (moveQueued) return;
@@ -212,10 +219,16 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       const { clientX: x, clientY: y } = ev;
       requestAnimationFrame(() => {
         moveQueued = false;
+        cursor = { x, y };
         // Phần tử neo có thể đã bị player thay mất (SPA dựng lại <video> sau khi
         // bắt đầu tải). Node rời DOM trả rect toàn số 0 mà không báo gì, nên
         // nếu cứ tin vào nó thì nút ẩn vĩnh viễn. Thấy rect hỏng thì neo lại.
         if (anchored && (!anchored.isConnected || !isUsableRect(anchored.getBoundingClientRect()))) {
+          place();
+        }
+        // Con trỏ đã rời khỏi cái đang neo: neo lại theo vị trí mới. Đây là
+        // cách duy nhất nút đi theo người dùng khi họ lướt qua từng bài.
+        if (!mounted && (!anchored || !isOverRect({ x, y }, [anchored.getBoundingClientRect()], 0))) {
           place();
         }
         const rects = [];
@@ -256,20 +269,18 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // cả, nên người dùng không có đường nào tải. Video xếp trước ảnh để bài
       // vừa có video vừa có ảnh thì nút vẫn về video (ca thường hơn hẳn).
       const vids = [...document.querySelectorAll('video')] as HTMLVideoElement[];
-      // CHỈ xét ảnh khi không có video nào: vừa để video luôn thắng, vừa để
-      // khỏi quét toàn bộ `<img>` của trang trên mỗi lần cuộn (feed có hàng
-      // trăm ảnh — quét mỗi nhịp là thấy giật).
-      const imgs = vids.length
-        ? []
-        : ([...document.querySelectorAll('img')] as HTMLImageElement[]).filter(
-            (im) => im.naturalWidth >= MIN_PHOTO_PX && im.naturalHeight >= MIN_PHOTO_PX,
-          );
+      // Trên feed vừa có ảnh vừa có video, cái nào con trỏ đang trỏ vào thì neo
+      // vào cái đó — xem pickAnchor. Lọc trước theo `naturalWidth` (thuộc tính
+      // rẻ, không gây layout) để khỏi đo hàng trăm ảnh vặt mỗi nhịp cuộn.
+      const imgs = ([...document.querySelectorAll('img')] as HTMLImageElement[]).filter(
+        (im) => im.naturalWidth >= MIN_PHOTO_PX && im.naturalHeight >= MIN_PHOTO_PX,
+      );
       const media: (HTMLVideoElement | HTMLImageElement)[] = [...vids, ...imgs];
       const shaped = media.map((m) => ({
         rect: m.getBoundingClientRect(),
         playing: m instanceof HTMLVideoElement && !m.paused && !m.ended && m.readyState > 2,
       }));
-      const i = pickAnchor(shaped, { width: window.innerWidth, height: window.innerHeight });
+      const i = pickAnchor(shaped, { width: window.innerWidth, height: window.innerHeight }, cursor);
 
       let pos: { top: number; left: number };
       if (i < 0) {

@@ -49,7 +49,11 @@ function inViewport(r: Rect, view: { width: number; height: number }): boolean {
  * Lọc theo khung nhìn CHỈ KHI còn ứng viên: video cuộn khuất vẫn hơn là không
  * có nút nào.
  */
-export function pickAnchor(videos: VideoLike[], viewport: { width: number; height: number }): number {
+export function pickAnchor(
+  videos: VideoLike[],
+  viewport: { width: number; height: number },
+  cursor?: { x: number; y: number } | null,
+): number {
   const idx = videos
     .map((v, i) => i)
     .filter((i) => {
@@ -57,6 +61,21 @@ export function pickAnchor(videos: VideoLike[], viewport: { width: number; heigh
       return r.width >= MIN_VIDEO_PX && r.height >= MIN_VIDEO_PX;
     });
   if (!idx.length) return -1;
+
+  // Con trỏ đang nằm trên cái nào thì neo vào cái đó. Đo thật trên một feed
+  // vừa có ảnh vừa có video: luật "đang phát trước, rồi lớn nhất" luôn chọn
+  // video ở bài KHÁC, nên bài người dùng đang trỏ vào không có nút nào.
+  if (cursor) {
+    const under = idx.filter((i) => {
+      const r = videos[i].rect;
+      return cursor.x >= r.left && cursor.x <= r.left + r.width
+        && cursor.y >= r.top && cursor.y <= r.top + r.height;
+    });
+    // Lồng nhau thì lấy cái trong cùng — nó là thứ người dùng thật sự trỏ vào.
+    if (under.length) {
+      return under.reduce((best, i) => (area(videos[i].rect) < area(videos[best].rect) ? i : best), under[0]);
+    }
+  }
 
   const visible = idx.filter((i) => inViewport(videos[i].rect, viewport));
   const pool = visible.length ? visible : idx;

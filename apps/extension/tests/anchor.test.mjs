@@ -94,5 +94,23 @@ t('quá hạn thì ẩn dù không có sự kiện chuột nào nữa', () => lv
 t('ngưỡng tươi hẹp hơn hạn ẩn rất nhiều', () => HOVER_FRESH_MS < FAB_HIDE_MS, true);
 t('nhịp kiểm đủ dày để ẩn không trễ quá một giây', () => HOVER_TICK_MS <= 1000, true);
 
+// --- con tro quyet dinh, khong phai "dang phat / lon nhat" ---
+const box = (top, left, w, h) => ({ rect: { top, left, width: w, height: h }, playing: false });
+const SCREEN = { width: 1000, height: 1000 };
+t('neo vao cai con tro dang tro vao, du cai kia dang phat',
+  () => pickAnchor(
+    [{ rect: { top: 0, left: 0, width: 400, height: 400 }, playing: true }, box(500, 0, 400, 400)],
+    SCREEN, { x: 100, y: 600 }), 1);
+t('con tro ngoai moi cai thi ve luat cu - dang phat truoc',
+  () => pickAnchor(
+    [{ rect: { top: 0, left: 0, width: 400, height: 400 }, playing: true }, box(500, 0, 400, 400)],
+    SCREEN, { x: 900, y: 900 }), 0);
+t('long nhau thi lay cai TRONG CUNG',
+  () => pickAnchor([box(0, 0, 900, 900), box(100, 100, 300, 300)], SCREEN, { x: 200, y: 200 }), 1);
+t('khong truyen con tro thi khong doi gi',
+  () => pickAnchor([box(0, 0, 400, 400), box(0, 0, 800, 800)], SCREEN), 1);
+t('con tro tren cai qua nho thi khong neo vao no',
+  () => pickAnchor([box(0, 0, 50, 50), box(0, 0, 400, 400)], SCREEN, { x: 10, y: 10 }), 1);
+
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
