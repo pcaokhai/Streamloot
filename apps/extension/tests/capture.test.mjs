@@ -1,4 +1,4 @@
-import { mediaKind, worthCapturing, contentLengthOf, contentTypeOf, MIN_PROGRESSIVE_BYTES } from '../.tmp-capture.mjs';
+import { mediaKind, worthCapturing, contentLengthOf, contentTypeOf, extFromUrl, MIN_PROGRESSIVE_BYTES } from '../.tmp-capture.mjs';
 
 let pass = 0, fail = 0;
 const t = (name, fn, want) => {
@@ -53,6 +53,26 @@ t('header rác thì null', () => contentLengthOf([{ name: 'Content-Length', valu
 t('undefined thì null', () => contentLengthOf(undefined), null);
 t('đọc content-type', () => contentTypeOf(H), 'video/mp4');
 t('thiếu content-type thì null', () => contentTypeOf([]), null);
+
+// --- đuôi file: bản đầu nhặt phải mảnh từ tên miền và hiện ".com/" ---
+t('đuôi thường', () => extFromUrl('https://cdn.example.test/a/v.mp4'), 'mp4');
+t('bỏ qua query', () => extFromUrl('https://cdn.example.test/v.mp4?tok=1&x=2'), 'mp4');
+t('URL KHÔNG có đuôi file -> mp4, KHÔNG lấy mảnh từ host',
+  () => extFromUrl('https://cdn.example.test/stream/abc'), 'mp4');
+t('dấu chấm chỉ nằm ở host thì bỏ qua',
+  () => extFromUrl('https://media.sub.example.test/play'), 'mp4');
+// Ca này TÁCH RIÊNG hai lớp bảo vệ. Danh sách trắng che được gần hết trường
+// hợp đọc-nhầm-từ-cả-URL, vì rác thường không khớp đuôi nào và rơi về "mp4" —
+// đúng bằng giá trị mặc định, nên test không phân biệt được. Chỉ khi đáp án
+// đúng KHÁC "mp4" mới lộ ra: ở đây đuôi thật nằm ở đường dẫn (.webm) còn
+// query lại chứa một đuôi hợp lệ khác (.mp4).
+t('đuôi lấy từ đường dẫn, không phải từ query',
+  () => extFromUrl('https://cdn.example.test/v.webm?fallback=a.mp4'), 'webm');
+t('webm giữ nguyên', () => extFromUrl('https://cdn.example.test/v.webm'), 'webm');
+t('m3u8 giữ nguyên', () => extFromUrl('https://cdn.example.test/master.m3u8'), 'm3u8');
+t('đuôi lạ thì lùi về mp4', () => extFromUrl('https://cdn.example.test/v.xyzzy'), 'mp4');
+t('URL rác không làm ném', () => extFromUrl('khong-phai-url'), 'mp4');
+t('chuỗi rỗng', () => extFromUrl(''), 'mp4');
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

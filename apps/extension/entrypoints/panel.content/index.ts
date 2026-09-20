@@ -19,6 +19,7 @@ import { pickAnchor, buttonPos, panelPos, shouldHideFab, isOverRect, isUsableRec
 import { groupFormats, qualityName } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
+import { extFromUrl } from '../../lib/capture';
 import { extractPlayerResponse, formatsFromPlayerResponse, playerResponseVideoId, currentVideoId, sameVideo } from '../../lib/youtube';
 import { extractVideos, pickByDuration, listLabel, watchUrl } from '../../lib/facebook';
 import { parseMpd } from '../../lib/dash';
@@ -783,7 +784,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       // Hỏi backend ở đây là treo panel ở "Đang lấy danh sách chất lượng…" cho
       // tới khi hết giờ — đúng lỗi đã gặp. Hiện ngay một dòng tải thẳng.
       if (cap?.kind === 'progressive') {
-        const ext = (cap.url.split('?')[0].split('.').pop() ?? 'mp4').slice(0, 4);
+        const ext = extFromUrl(cap.url);
         say('Bấm một dòng để tải');
         addGroup('VIDEO', '▭', [{
           formatId: '',

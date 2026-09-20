@@ -80,3 +80,30 @@ export function contentTypeOf(
 ): string | null {
   return headers?.find((x) => x.name.toLowerCase() === 'content-type')?.value ?? null;
 }
+
+/** Đuôi file coi là media hợp lệ. Ngoài danh sách này thì không tin. */
+const KNOWN_EXT = new Set(['mp4', 'm4v', 'webm', 'mov', 'mkv', 'm4a', 'mp3', 'ts', 'm3u8', 'mpd']);
+
+/**
+ * Đuôi file suy từ URL, mặc định `mp4`.
+ *
+ * Phải đọc từ ĐOẠN CUỐI CỦA ĐƯỜNG DẪN, không phải từ cả URL. Bản đầu làm
+ * `url.split('.').pop()` nên với URL không có đuôi file thì nó nhặt mảnh từ
+ * tên miền và hiện ra ".com/" trong cột đuôi.
+ *
+ * Không nhận đuôi lạ: thà hiện "mp4" (đúng gần hết các lần) còn hơn hiện một
+ * mẩu vô nghĩa lấy từ query hay từ host.
+ */
+export function extFromUrl(url: string): string {
+  let path = url;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    path = url.split('?')[0].split('#')[0];
+  }
+  const last = path.split('/').filter(Boolean).pop() ?? '';
+  const dot = last.lastIndexOf('.');
+  if (dot < 0) return 'mp4';
+  const ext = last.slice(dot + 1).toLowerCase();
+  return KNOWN_EXT.has(ext) ? ext : 'mp4';
+}
