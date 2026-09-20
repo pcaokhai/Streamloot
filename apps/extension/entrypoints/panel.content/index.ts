@@ -792,11 +792,13 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         // thông tin đó, nhưng trình duyệt thì biết. Nhờ vậy dòng hiện đúng tên
         // mức ("Full HD", "HD"…) thay vì một chữ "Gốc" chung chung.
         const h = anchored?.videoHeight || 0;
-        const name = qualityName(h) || 'Gốc';
+        // Không đọc được chiều cao thì gọi là "Tiêu chuẩn" và để trống cột độ
+        // phân giải — bịa một con số ở đó còn tệ hơn là không nói gì.
+        const name = qualityName(h) || 'Tiêu chuẩn';
         say('Bấm một dòng để tải');
         addGroup('VIDEO', '▭', [{
           formatId: '',
-          label: h > 0 ? `${h}p` : 'Chất lượng gốc',
+          label: h > 0 ? `${h}p` : '',
           detail: ext,
           recommended: true,
           name,
@@ -813,7 +815,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         // được cả khi CDN từ chối lượt tải thẳng của trình duyệt (thiếu Referer).
         addGroup('NẾU TẢI THẲNG BỊ CHẶN', '▲', [{
           formatId: '',
-          label: h > 0 ? `${h}p` : 'Chất lượng gốc',
+          label: h > 0 ? `${h}p` : '',
           detail: ext,
           recommended: false,
           name: 'Qua app',
