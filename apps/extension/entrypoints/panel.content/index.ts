@@ -663,7 +663,9 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
           r = await ask<{ ok: boolean; error?: string }>({
             type: 'saveDirect',
             url: row.directUrl,
-            filename: row.fileName ?? 'video.mp4',
+            // Lùi cũng phải đi qua downloadName: chuỗi trần sẽ rơi thẳng vào
+            // `~/Downloads`, ngoài thư mục `downloader` của app.
+            filename: row.fileName ?? downloadName({ title: null, id: '', ext: row.ext }),
           });
         } catch (err) {
           say(err instanceof Error ? err.message : String(err), true);

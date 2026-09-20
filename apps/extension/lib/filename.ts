@@ -9,6 +9,17 @@
 /** Ký tự không được có trong tên file trên Windows/macOS, cộng ký tự điều khiển. */
 const UNSAFE = /[\\/:*?"<>|\u0000-\u001f]/g;
 
+/**
+ * Thư mục gốc cho mọi lượt tải của extension, nằm trong thư mục tải của trình
+ * duyệt.
+ *
+ * `chrome.downloads` lấy `~/Downloads` làm gốc, nên `folder` trần sẽ đẻ thẳng
+ * `~/Downloads/instagram`, `~/Downloads/facebook`… lẫn vào thư mục cá nhân của
+ * người dùng. Đặt gốc ở ĐÂY chứ không ở chỗ gọi: chỗ gọi quên một lần là lại
+ * rải thư mục ra `~/Downloads`.
+ */
+export const DOWNLOAD_ROOT = 'downloader';
+
 /** Tên dài quá thì một số hệ tệp từ chối; chừa chỗ cho đuôi và hậu tố. */
 const MAX_BASE = 120;
 
@@ -40,7 +51,8 @@ export function downloadName(o: {
   const ext = (o.ext ?? 'mp4').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'mp4';
   const name = q ? `${base} (${q}).${ext}` : `${base}.${ext}`;
   // Thư mục theo site, cùng quy ước với bên app; sanitize trước vì `sanitize`
-  // biến `/` thành `_`, nên dấu `/` duy nhất còn lại là dấu ngăn thư mục.
-  const dir = sanitize(o.folder ?? '');
-  return dir ? `${dir}/${name}` : name;
+  // biến `/` thành `_`, nên mọi dấu `/` còn lại đều là dấu ngăn thư mục do
+  // chính ta đặt — không có đường nào để tên file tự tạo thư mục con.
+  const dir = [DOWNLOAD_ROOT, sanitize(o.folder ?? '')].filter(Boolean).join('/');
+  return `${dir}/${name}`;
 }
