@@ -20,12 +20,13 @@ import { groupFormats, qualityName } from '../../lib/formats';
 import type { FormatRow } from '../../lib/formats';
 import { canSubmit } from '../../lib/submitGuard';
 import { extFromUrl } from '../../lib/capture';
-import { cleanTitle } from '../../lib/title';
+import { cleanTitle, brandOf } from '../../lib/title';
 import { extractPlayerResponse, formatsFromPlayerResponse, playerResponseVideoId, currentVideoId, sameVideo } from '../../lib/youtube';
 import { extractVideos, pickByDuration, listLabel, watchUrl } from '../../lib/facebook';
 import { parseMpd } from '../../lib/dash';
 import type { FbVideo } from '../../lib/facebook';
 import { downloadName } from '../../lib/filename';
+import { deeperPermalink } from '../../lib/permalink';
 
 /**
  * Panel KHÔNG gọi HTTP trực tiếp.
@@ -463,8 +464,26 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
       //
       // Không bắt được manifest nào mới đi đường yt-dlp: trang vẫn tải được
       // (YouTube chẳng hạn, vốn không dùng manifest file).
+      /** Link riêng của video đang neo, nếu trang hiện tại là feed. */
+      function permalinkForAnchored(): string | null {
+        const hrefs: string[] = [];
+        for (let el: HTMLElement | null = anchored; el; el = el.parentElement) {
+          for (const a of el.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+            hrefs.push(a.getAttribute('href') ?? '');
+          }
+          // Leo tới khi có link là đủ — leo thêm chỉ lôi về link của video khác.
+          if (hrefs.length) break;
+        }
+        return deeperPermalink(location.href, hrefs);
+      }
+
       const byUrl = !cap;
       if (byUrl && !hasVideo()) return;
+
+      // Trên feed (Instagram, Facebook…), `location.href` là trang chủ: gửi nó
+      // cho yt-dlp thì nhận "Unsupported URL". Link riêng của video nằm ngay
+      // cạnh nó trong DOM, nên leo ngược lên tìm.
+      const targetUrl = permalinkForAnchored() ?? location.href;
 
       root.innerHTML = '';
       const head = document.createElement('div');
@@ -610,7 +629,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
             type: 'startByManifest',
             manifestXml: row.manifestXml,
             title: cleanTitle(document.title, location.hostname),
-            url: location.href,
+            url: targetUrl,
             formatId: row.formatId || null,
           });
         } catch (err) {
@@ -674,7 +693,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         try {
           r = await ask<{ ok: boolean; error?: string }>(
             byUrl
-              ? { type: 'startByUrl', url: location.href, formatId }
+              ? { type: 'startByUrl', url: targetUrl, formatId }
               : { type: 'startDownload', info: info!, formatId },
           );
         } catch (err) {
@@ -730,6 +749,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
             directUrl: p.url,
             fileName: downloadName({
               title: cleanTitle(document.title, location.hostname),
+              folder: brandOf(location.hostname),
               id: v.id,
               quality: p.quality,
               ext: 'mp4',
@@ -807,6 +827,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
           directUrl: cap.url,
           fileName: downloadName({
             title: cleanTitle(document.title, location.hostname),
+            folder: brandOf(location.hostname),
             id: cap.host,
             ext,
           }),
@@ -833,7 +854,7 @@ async function start(ctx: InstanceType<typeof ContentScriptContext>) {
         ? formatsFromPage().then((f) =>
             f.length
               ? { ok: true as const, formats: f }
-              : ask<FormatsReply>({ type: 'formatsByUrl', url: location.href }),
+              : ask<FormatsReply>({ type: 'formatsByUrl', url: targetUrl }),
           )
         : ask<FormatsReply>({ type: 'listFormats', info: payload! });
       void askFormats.then((r) => {

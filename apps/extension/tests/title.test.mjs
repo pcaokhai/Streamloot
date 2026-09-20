@@ -43,5 +43,11 @@ t('toàn khoảng trắng', () => cleanTitle('   ', 'vidu.com'), '');
 t('giữ dấu tiếng Việt',
   () => cleanTitle('Mẹ tôi kể chuyện | VIDU', 'vidu.com'), 'Mẹ tôi kể chuyện');
 
+// --- brandOf: dùng làm tên thư mục, nên `m.` không được thành tên site ---
+t('bo www', () => brandOf('www.vidu.com'), 'vidu');
+t('bo m - `m.` va `www.` la cung mot site', () => brandOf('m.vidu.com'), 'vidu');
+t('host khong co tien to thua', () => brandOf('vidu.com'), 'vidu');
+t('host toan tien to thua van tra ve mot thu', () => brandOf('www'), 'www');
+
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

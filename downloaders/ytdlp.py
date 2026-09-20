@@ -19,6 +19,7 @@ from utils.logger import Logger
 from utils.info_cache import info_cache
 from utils.ytdlp_progress import ProgressReader, split_updates
 from utils.text import format_speed
+from utils.sites import site_folder
 
 class YtDlpDownloader(BaseDownloader):
     """
@@ -205,6 +206,9 @@ class YtDlpDownloader(BaseDownloader):
         if not output_dir:
             output_dir = str(Path.home() / "Downloads" / "downloader")
             
+        # Mỗi site một thư mục con, nếu không mọi lượt tải đổ chung một chỗ.
+        output_dir = os.path.join(output_dir, site_folder(video_info.page_url or video_info.m3u8_url))
+
         if video_info.playlist_name:
             safe_playlist_name = re.sub(r'[\\/*?:"<>|\n\r\t]', "", video_info.playlist_name).strip()
             output_dir = os.path.join(output_dir, safe_playlist_name)

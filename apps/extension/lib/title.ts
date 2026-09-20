@@ -16,8 +16,12 @@ const SEP = /\s+[|·–—]\s+|\s+-\s+/;
  * site — so theo hostname chứ KHÔNG theo danh sách site viết cứng, vì danh
  * sách đó vừa không bao giờ đủ vừa là thứ CLAUDE.md §3.1 cấm.
  */
+const NOISE = new Set(['www', 'm', 'mobile', 'video', 'watch', 'player']);
+
 export function brandOf(hostname: string): string {
-  const parts = hostname.toLowerCase().replace(/^www\./, '').split('.');
+  const parts = hostname.toLowerCase().split('.').filter(Boolean);
+  // `m.` và `www.` là cùng một site; giữ lại thì `m` thành cả "tên site".
+  while (parts.length > 1 && NOISE.has(parts[0]!)) parts.shift();
   return parts[0] ?? '';
 }
 

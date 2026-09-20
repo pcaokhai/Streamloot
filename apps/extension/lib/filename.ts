@@ -33,9 +33,14 @@ export function downloadName(o: {
   id: string;
   quality?: string | null;
   ext?: string | null;
+  folder?: string | null;
 }): string {
   const base = sanitize(o.title ?? '') || sanitize(o.id) || 'video';
   const q = sanitize(o.quality ?? '');
   const ext = (o.ext ?? 'mp4').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'mp4';
-  return q ? `${base} (${q}).${ext}` : `${base}.${ext}`;
+  const name = q ? `${base} (${q}).${ext}` : `${base}.${ext}`;
+  // Thư mục theo site, cùng quy ước với bên app; sanitize trước vì `sanitize`
+  // biến `/` thành `_`, nên dấu `/` duy nhất còn lại là dấu ngăn thư mục.
+  const dir = sanitize(o.folder ?? '');
+  return dir ? `${dir}/${name}` : name;
 }
